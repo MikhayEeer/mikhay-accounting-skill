@@ -1,0 +1,30 @@
+# Real/private bookkeeping data
+data/
+raw/
+exports/
+private/
+real/
+
+# Local generated reports
+reports/
+dist/
+*.local.csv
+*.local.json
+*.private.csv
+*.private.json
+*.real.csv
+*.real.json
+*.tar.gz
+*.zip
+
+# Keep examples trackable
+!examples/
+!examples/**
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local agent/tool settings
+.claude/
+.codex/
