@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mikhay Accounting"
+  short_description: "Chinese ledger validation, classification, and statistics."
+  default_prompt: "Use this skill to work with Chinese CSV/JSON ledgers using 时间, 收支类型, 金额, 类别, 子类, 账户, 备注, tags, note."
