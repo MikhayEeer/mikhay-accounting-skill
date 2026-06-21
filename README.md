@@ -2,6 +2,26 @@
 
 Chinese personal accounting workflow for CSV/JSON ledger files.
 
+## 导入导出
+
+导入 CSV/XLSX 到标准 JSON：
+
+```bash
+python scripts/import_ledger.py raw/bill.csv --output data/imported.json
+```
+
+按月拆分导入：
+
+```bash
+python scripts/import_ledger.py raw/bill.csv --split-by-month --output data/
+```
+
+导出标准 JSON 到 CSV：
+
+```bash
+python scripts/export_ledger.py data/2026-06.json --output exports/2026-06.csv
+```
+
 ## 一键封装
 
 生成给其他 Agent 使用的离线包：
@@ -17,7 +37,7 @@ dist/mikhay-accounting-skill.tar.gz
 dist/mikhay-accounting-skill.zip
 ```
 
-包内只包含 skill、规则、脚本和脱敏示例，不包含 `data/`、`raw/`、`exports/`、`.claude/`、`.codex/` 等真实数据或本地配置。
+包内只包含 skill、导入规则、脚本和脱敏示例，不包含 `data/`、`raw/`、`exports/`、`.claude/`、`.codex/` 等真实数据或本地配置。
 
 ## 记账场景：使用 skill 与不使用 skill 的对比
 

@@ -7,11 +7,23 @@ Use this folder as a self-contained accounting skill.
 1. Read `SKILL.md`.
 2. Read `schema.md` before editing ledger data.
 3. Read `categories.md` before classifying records.
-4. Run validation before statistics:
+4. Import third-party bills when needed:
+
+```bash
+python scripts/import_ledger.py <bill.csv-or-xlsx> --output data/imported.json
+```
+
+5. Run validation before statistics:
 
 ```bash
 python scripts/validate_ledger.py <ledger.csv-or-json>
 python scripts/summarize_ledger.py <ledger.csv-or-json>
+```
+
+6. Export standard JSON when needed:
+
+```bash
+python scripts/export_ledger.py <ledger.json> --output exports/ledger.csv
 ```
 
 ## Data Safety
