@@ -47,6 +47,10 @@ def export_json(path: Path, month: str, records: list[dict[str, Any]], source: d
     }
     if source.get("asset_snapshots"):
         payload["asset_snapshots"] = source["asset_snapshots"]
+    if source.get("credit_accounts"):
+        payload["credit_accounts"] = source["credit_accounts"]
+    if source.get("installment_plans"):
+        payload["installment_plans"] = source["installment_plans"]
     if source.get("repayment_reminders"):
         payload["repayment_reminders"] = source["repayment_reminders"]
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

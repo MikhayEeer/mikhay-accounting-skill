@@ -22,6 +22,16 @@ python scripts/import_ledger.py raw/bill.csv --split-by-month --output data/
 python scripts/export_ledger.py data/2026-06.json --output exports/2026-06.csv
 ```
 
+## 资产模块
+
+查询总资产、总负债、净资产、分期和还款提醒：
+
+```bash
+python scripts/summarize_assets.py data/assets.json
+```
+
+记账会影响资产统计；直接改资产快照时，默认先询问是否创建差额记账项。
+
 ## 一键封装
 
 生成给其他 Agent 使用的离线包：

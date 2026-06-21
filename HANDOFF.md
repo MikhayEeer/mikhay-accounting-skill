@@ -20,11 +20,19 @@ python scripts/validate_ledger.py <ledger.csv-or-json>
 python scripts/summarize_ledger.py <ledger.csv-or-json>
 ```
 
-6. Export standard JSON when needed:
+6. Query assets, debt, net assets, installments, and reminders when needed:
+
+```bash
+python scripts/summarize_assets.py <ledger-or-assets.json>
+```
+
+7. Export standard JSON when needed:
 
 ```bash
 python scripts/export_ledger.py <ledger.json> --output exports/ledger.csv
 ```
+
+Direct asset edits should report the ledger-derived difference and ask before creating adjustment records.
 
 ## Data Safety
 
@@ -46,4 +54,4 @@ Create a handoff bundle:
 python scripts/package_skill.py
 ```
 
-Share files from `dist/`.
+Share files from `dist`.

@@ -21,6 +21,7 @@ INCLUDE_FILES = {
     "SKILL.md",
     "schema.md",
     "categories.md",
+    "accounts.md",
     "import_rules.md",
 }
 EXCLUDE_PARTS = {
