@@ -1,4 +1,4 @@
 interface:
   display_name: "Mikhay Accounting"
-  short_description: "Chinese ledger import, export, assets, debt, and statistics."
-  default_prompt: "Use this skill to import/export Chinese CSV/XLSX/JSON ledgers, store records by year/month shards, and query assets, debt, installments, reminders, and net assets."
+  short_description: "Chinese ledger, assets, debt, wishlist, and statistics."
+  default_prompt: "Use this skill to import/export Chinese CSV/XLSX/JSON ledgers, store records by year/month shards, query assets/debt, and analyze planned purchase wishlist pressure."

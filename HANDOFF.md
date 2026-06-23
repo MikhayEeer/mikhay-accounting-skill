@@ -27,7 +27,13 @@ python scripts/summarize_ledger.py <ledger.csv-or-json>
 python scripts/summarize_assets.py <ledger-or-assets.json>
 ```
 
-8. Export standard JSON when needed:
+8. Analyze planned purchases when needed:
+
+```bash
+python scripts/analyze_wishlist.py <wishlist.json> --ledger <month-ledger.json> --assets <assets.json>
+```
+
+9. Export standard JSON when needed:
 
 ```bash
 python scripts/export_ledger.py <ledger.json> --output exports/ledger.csv
@@ -51,6 +57,7 @@ Preferred ledger shards:
 
 - `data/ledger/YYYY/YYYY-MM.json`
 - `data/assets/YYYY/YYYY-MM.assets.json`
+- `data/wishlist/YYYY/wishlist.json`
 
 ## Package
 

@@ -1,6 +1,6 @@
 ---
 name: mikhay-accounting-skill
-description: Chinese personal accounting workflow for CSV/JSON/XLSX ledger and asset files. Use when the user asks to import, export, record, classify, validate, summarize, store, or analyze records with fields like 时间, 收支类型, 金额, 类别, 子类, 账户, 备注, tags, note; supports 支出, 收入, 还款, 转账, year/month shard layout, third-party bill conversion, account balances, credit debt, installment plans, repayment reminders, net asset statistics, and monthly reports.
+description: Chinese personal accounting workflow for CSV/JSON/XLSX ledger, asset, and wishlist files. Use when the user asks to import, export, record, classify, validate, summarize, store, analyze records, or evaluate planned purchases with fields like 时间, 收支类型, 金额, 类别, 子类, 账户, 备注, tags, note; supports 支出, 收入, 还款, 转账, year/month shard layout, third-party bill conversion, account balances, credit debt, installment plans, repayment reminders, net asset statistics, pre-purchase wishlist pressure analysis, and monthly reports.
 ---
 
 # Mikhay Accounting Skill
@@ -15,12 +15,14 @@ Read these files only as needed:
 - `categories.md`: category, subcategory, and legacy alias rules.
 - `accounts.md`: account balance, liability, installment, repayment, and sync rules.
 - `storage.md`: year/month shard layout for large ledgers.
+- `wishlist.md`: pre-purchase wishlist schema and rules.
 - `import_rules.md`: third-party CSV/XLSX import mapping rules.
 - `scripts/import_ledger.py`: convert CSV/XLSX/JSON bills to standard JSON.
 - `scripts/export_ledger.py`: export standard JSON to CSV or normalized JSON.
 - `scripts/validate_ledger.py`: deterministic format checks.
 - `scripts/summarize_ledger.py`: 基础收入、支出、还款、转账、分类统计。
 - `scripts/summarize_assets.py`: 资产、负债、净资产、分期、还款提醒。
+- `scripts/analyze_wishlist.py`: 预购清单经济压力、购买建议、优先级。
 
 ## Workflow
 
@@ -34,8 +36,9 @@ Read these files only as needed:
 8. Use `scripts/validate_ledger.py <file>` before trusting data.
 9. Use `scripts/summarize_ledger.py <file>` for quick statistics.
 10. Use `scripts/summarize_assets.py <json>` for total assets, debt, net assets, installments, and reminders.
-11. Export with `scripts/export_ledger.py <json> --output exports/ledger.csv`.
-12. Mark uncertain classifications as `待确认`.
+11. Use `scripts/analyze_wishlist.py <wishlist.json> --ledger <month.json> --assets <assets.json>` for planned purchases.
+12. Export with `scripts/export_ledger.py <json> --output exports/ledger.csv`.
+13. Mark uncertain classifications as `待确认`.
 
 ## Data Rules
 
@@ -46,6 +49,7 @@ Read these files only as needed:
 - `还款` is separate from normal spending; display it as a positive total.
 - Ledger records should update asset statistics: spending lowers assets or raises debt; income raises assets; repayment lowers cash and debt; transfer moves money.
 - If direct asset edits differ from ledger-derived balances, report the difference and ask before creating an adjustment item.
+- Wishlist items are planned purchases, not ledger records; create a `支出` record only after purchase.
 - Prefer year/month shards like `data/ledger/2026/2026-06.json`; do not load all shards unless required.
 - Keep real data in ignored folders such as `data/`, `raw/`, or `exports/`.
 

@@ -23,6 +23,7 @@ INCLUDE_FILES = {
     "categories.md",
     "accounts.md",
     "storage.md",
+    "wishlist.md",
     "import_rules.md",
 }
 EXCLUDE_PARTS = {

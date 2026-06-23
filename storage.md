@@ -13,6 +13,9 @@ data/
   assets/
     2026/
       2026-06.assets.json
+  wishlist/
+    2026/
+      wishlist.json
 raw/
   2026/
     2026-06/
@@ -26,6 +29,7 @@ reports/
 
 - Store transaction records by month: `data/ledger/YYYY/YYYY-MM.json`.
 - Store asset snapshots separately when they are not part of the monthly ledger: `data/assets/YYYY/YYYY-MM.assets.json`.
+- Store planned purchases separately: `data/wishlist/YYYY/wishlist.json`.
 - Keep raw third-party bills under `raw/YYYY/YYYY-MM/`.
 - Keep generated CSV/JSON exports under `exports/YYYY/`.
 - Keep generated reports under `reports/YYYY/`.

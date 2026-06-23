@@ -34,6 +34,16 @@ python scripts/summarize_assets.py data/assets/2026/2026-06.assets.json
 
 记账会影响资产统计；直接改资产快照时，默认先询问是否创建差额记账项。
 
+## 预购清单
+
+分析想买物品的经济压力、购买建议和优先级：
+
+```bash
+python scripts/analyze_wishlist.py data/wishlist/2026/wishlist.json --ledger data/ledger/2026/2026-06.json --assets data/assets/2026/2026-06.assets.json
+```
+
+预购清单不是账本记录，真正购买后再生成 `支出` item。
+
 ## 一键封装
 
 生成给其他 Agent 使用的离线包：
