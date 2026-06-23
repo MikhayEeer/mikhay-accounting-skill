@@ -312,6 +312,12 @@ def output_path_for(args: argparse.Namespace, records: list[dict[str, Any]]) -> 
     return Path("data") / "imported.json"
 
 
+def monthly_output_path(out_dir: Path, month: str, year_dirs: bool) -> Path:
+    if year_dirs:
+        return out_dir / month[:4] / f"{month}.json"
+    return out_dir / f"{month}.json"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Import CSV/XLSX bills into standard ledger JSON.")
     parser.add_argument("input", type=Path)
@@ -320,8 +326,11 @@ def main() -> int:
     parser.add_argument("--account", help="Fallback account when the source file has no account column.")
     parser.add_argument("--month", help="Only import records whose 时间 starts with YYYY-MM.")
     parser.add_argument("--split-by-month", action="store_true", help="Write one JSON file per month.")
+    parser.add_argument("--year-dirs", action="store_true", help="With --split-by-month, write files as <output>/YYYY/YYYY-MM.json.")
     args = parser.parse_args()
 
+    if args.year_dirs and not args.split_by_month:
+        raise SystemExit("--year-dirs requires --split-by-month")
     if args.account and args.account not in ACCOUNTS:
         raise SystemExit(f"Invalid fallback account: {args.account}")
     rows = load_rows(args.input)
@@ -340,8 +349,9 @@ def main() -> int:
         for record in records:
             grouped[month_of(record)].append(record)
         for month, month_records in sorted(grouped.items()):
-            write_json(out_dir / f"{month}.json", month_records, month)
-            print(f"wrote {out_dir / f'{month}.json'} records={len(month_records)} warnings={len(warnings)}")
+            out = monthly_output_path(out_dir, month, args.year_dirs)
+            write_json(out, month_records, month)
+            print(f"wrote {out} records={len(month_records)} warnings={len(warnings)}")
         return 0
     out = output_path_for(args, records)
     write_json(out, records, args.month or (month_of(records[0]) if records else None))

@@ -31,6 +31,8 @@ Preferred monthly file:
 
 A JSON list is also accepted and treated as records.
 
+Preferred storage path: `data/ledger/YYYY/YYYY-MM.json`.
+
 ## Type Rules
 
 - `支出`: 真实消费。

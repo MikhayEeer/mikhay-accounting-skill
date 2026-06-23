@@ -13,21 +13,23 @@ python scripts/import_ledger.py raw/bill.csv --output data/imported.json
 按月拆分导入：
 
 ```bash
-python scripts/import_ledger.py raw/bill.csv --split-by-month --output data/
+python scripts/import_ledger.py raw/bill.csv --split-by-month --year-dirs --output data/ledger
 ```
 
 导出标准 JSON 到 CSV：
 
 ```bash
-python scripts/export_ledger.py data/2026-06.json --output exports/2026-06.csv
+python scripts/export_ledger.py data/ledger/2026/2026-06.json --output exports/2026/2026-06.csv
 ```
+
+推荐真实账本按年月分片：`data/ledger/YYYY/YYYY-MM.json`。不要让 Agent 一次读取全部月份。
 
 ## 资产模块
 
 查询总资产、总负债、净资产、分期和还款提醒：
 
 ```bash
-python scripts/summarize_assets.py data/assets.json
+python scripts/summarize_assets.py data/assets/2026/2026-06.assets.json
 ```
 
 记账会影响资产统计；直接改资产快照时，默认先询问是否创建差额记账项。

@@ -22,6 +22,7 @@ INCLUDE_FILES = {
     "schema.md",
     "categories.md",
     "accounts.md",
+    "storage.md",
     "import_rules.md",
 }
 EXCLUDE_PARTS = {

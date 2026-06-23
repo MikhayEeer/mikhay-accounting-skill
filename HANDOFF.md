@@ -7,26 +7,27 @@ Use this folder as a self-contained accounting skill.
 1. Read `SKILL.md`.
 2. Read `schema.md` before editing ledger data.
 3. Read `categories.md` before classifying records.
-4. Import third-party bills when needed:
+4. Read `storage.md` before locating or writing real ledger files.
+5. Import third-party bills when needed:
 
 ```bash
-python scripts/import_ledger.py <bill.csv-or-xlsx> --output data/imported.json
+python scripts/import_ledger.py <bill.csv-or-xlsx> --split-by-month --year-dirs --output data/ledger
 ```
 
-5. Run validation before statistics:
+6. Run validation before statistics:
 
 ```bash
 python scripts/validate_ledger.py <ledger.csv-or-json>
 python scripts/summarize_ledger.py <ledger.csv-or-json>
 ```
 
-6. Query assets, debt, net assets, installments, and reminders when needed:
+7. Query assets, debt, net assets, installments, and reminders when needed:
 
 ```bash
 python scripts/summarize_assets.py <ledger-or-assets.json>
 ```
 
-7. Export standard JSON when needed:
+8. Export standard JSON when needed:
 
 ```bash
 python scripts/export_ledger.py <ledger.json> --output exports/ledger.csv
@@ -46,6 +47,11 @@ Private data should stay in ignored folders:
 - `private/`
 - `real/`
 
+Preferred ledger shards:
+
+- `data/ledger/YYYY/YYYY-MM.json`
+- `data/assets/YYYY/YYYY-MM.assets.json`
+
 ## Package
 
 Create a handoff bundle:
@@ -54,4 +60,4 @@ Create a handoff bundle:
 python scripts/package_skill.py
 ```
 
-Share files from `dist`.
+Share files from `dist/`.

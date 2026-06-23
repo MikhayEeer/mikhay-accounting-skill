@@ -36,5 +36,5 @@ python scripts/import_ledger.py raw/bill.csv --output data/imported.json
 Split by month:
 
 ```bash
-python scripts/import_ledger.py raw/bill.csv --split-by-month --output data/
+python scripts/import_ledger.py raw/bill.csv --split-by-month --year-dirs --output data/ledger
 ```
