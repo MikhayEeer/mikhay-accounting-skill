@@ -64,7 +64,7 @@ class AccountingSmokeTests(unittest.TestCase):
         names = {path.as_posix() for path in collect_files(ROOT)}
         self.assertTrue({"VERSION", "SKILL.md", "credit.md", "assets/preferences.template.json"} <= names)
         self.assertFalse({"tests/test_smoke.py", "examples/book.sample.json", "data/private.json", "packages/output.zip"} & names)
-        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "2.0.0")
+        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "0.1.0")
 
 
 if __name__ == "__main__":
