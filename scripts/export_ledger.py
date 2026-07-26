@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-FIELDS = ["时间", "收支类型", "金额", "类别", "子类", "账户", "备注", "tags", "note"]
+FIELDS = ["时间", "收支类型", "金额", "账户", "事件", "备注", "target_account", "类别", "子类", "tags", "note"]
 
 
 def load_records(path: Path) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
@@ -45,14 +45,6 @@ def export_json(path: Path, month: str, records: list[dict[str, Any]], source: d
         "month": month,
         "records": records,
     }
-    if source.get("asset_snapshots"):
-        payload["asset_snapshots"] = source["asset_snapshots"]
-    if source.get("credit_accounts"):
-        payload["credit_accounts"] = source["credit_accounts"]
-    if source.get("installment_plans"):
-        payload["installment_plans"] = source["installment_plans"]
-    if source.get("repayment_reminders"):
-        payload["repayment_reminders"] = source["repayment_reminders"]
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 

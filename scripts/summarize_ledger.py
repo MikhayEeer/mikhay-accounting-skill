@@ -20,17 +20,13 @@ LEGACY_PAIR_ALIASES = {("购物消费", "饮料酒水"): ("食品餐饮", "饮�
 def load_file(path: Path) -> dict[str, Any]:
     if path.suffix.lower() == ".csv":
         with path.open("r", encoding="utf-8-sig", newline="") as f:
-            return {"records": list(csv.DictReader(f)), "asset_snapshots": [], "repayment_reminders": []}
+            return {"records": list(csv.DictReader(f))}
     if path.suffix.lower() == ".json":
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, list):
-            return {"records": data, "asset_snapshots": [], "repayment_reminders": []}
+            return {"records": data}
         if isinstance(data, dict):
-            return {
-                "records": data.get("records", data.get("transactions", [])),
-                "asset_snapshots": data.get("asset_snapshots", []),
-                "repayment_reminders": data.get("repayment_reminders", []),
-            }
+            return {"records": data.get("records", data.get("transactions", []))}
     raise SystemExit(f"Unsupported file type: {path}")
 
 
@@ -115,16 +111,6 @@ def main() -> int:
         print("\n## 还款按账户")
         for name, value in sorted(repayment_by_account.items(), key=lambda item: item[1], reverse=True):
             print(f"- {name}: {fmt(value)}")
-
-    if data["asset_snapshots"]:
-        print("\n## 资产快照")
-        asset_total = sum((money(r.get("金额")) for r in data["asset_snapshots"]), Decimal("0"))
-        print(f"- 合计: {fmt(asset_total)}")
-
-    if data["repayment_reminders"]:
-        print("\n## 还款提醒")
-        for row in sorted(data["repayment_reminders"], key=lambda r: str(r.get("时间", ""))):
-            print(f"- {row.get('时间')} {row.get('账户')}: {fmt(money(row.get('金额')))} {row.get('状态', '')}")
 
     return 0
 

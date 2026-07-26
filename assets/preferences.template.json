@@ -1,0 +1,9 @@
+{
+  "default_account": "",
+  "currency": "CNY",
+  "ledger_reply_template": "{账户} {收支类型} {金额} {时间} {事件}{备注块}",
+  "note_template": "（{备注}）",
+  "wishlist_reply_template": "Wishlist {状态} {名称}",
+  "amount_decimals": 2,
+  "time_format": "YYYY-MM-DD HH:mm"
+}

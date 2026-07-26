@@ -8,6 +8,7 @@ real/
 # Local generated reports
 reports/
 dist/
+packages/
 *.local.csv
 *.local.json
 *.private.csv
