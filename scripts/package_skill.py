@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
-"""Create portable handoff archives for this skill."""
+"""Build a versioned, allowlisted skill installation ZIP."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
-import tarfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 
 SKILL_NAME = "mikhay-accounting-skill"
-INCLUDE_DIRS = {"agents", "examples", "scripts"}
+INCLUDE_DIRS = {"agents", "assets", "scripts"}
 INCLUDE_FILES = {
     ".gitignore",
-    "README.md",
-    "HANDOFF.md",
+    "VERSION",
     "SKILL.md",
     "schema.md",
     "categories.md",
     "accounts.md",
-    "storage.md",
+    "credit.md",
     "wishlist.md",
     "import_rules.md",
 }
@@ -38,14 +36,14 @@ EXCLUDE_PARTS = {
     "real",
     "reports",
     "dist",
+    "packages",
+    "tests",
+    "examples",
 }
 
 
 def should_include(path: Path) -> bool:
-    parts = set(path.parts)
-    if parts & EXCLUDE_PARTS:
-        return False
-    if path.name.endswith(".pyc"):
+    if set(path.parts) & EXCLUDE_PARTS or path.suffix == ".pyc":
         return False
     if len(path.parts) == 1:
         return path.name in INCLUDE_FILES
@@ -53,73 +51,55 @@ def should_include(path: Path) -> bool:
 
 
 def digest(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    value = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
 
 
 def collect_files(root: Path) -> list[Path]:
-    files = []
-    for path in sorted(root.rglob("*")):
-        if path.is_file():
-            rel = path.relative_to(root)
-            if should_include(rel):
-                files.append(rel)
-    return files
+    return [
+        path.relative_to(root)
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and should_include(path.relative_to(root))
+    ]
 
 
-def write_manifest(root: Path, files: list[Path], output: Path) -> Path:
+def build_package(root: Path, output: Path) -> Path:
+    version = (root / "VERSION").read_text(encoding="utf-8").strip()
+    files = collect_files(root)
     manifest = {
         "name": SKILL_NAME,
+        "version": version,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files": [
-            {"path": str(path).replace("\\", "/"), "sha256": digest(root / path)}
+            {"path": path.as_posix(), "sha256": digest(root / path)}
             for path in files
         ],
     }
-    manifest_path = output / "MANIFEST.json"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return manifest_path
 
-
-def make_tar(root: Path, files: list[Path], manifest: Path, output: Path) -> Path:
-    target = output / f"{SKILL_NAME}.tar.gz"
-    with tarfile.open(target, "w:gz") as tar:
-        for rel in files:
-            tar.add(root / rel, arcname=f"{SKILL_NAME}/{rel.as_posix()}")
-        tar.add(manifest, arcname=f"{SKILL_NAME}/MANIFEST.json")
-    return target
-
-
-def make_zip(root: Path, files: list[Path], manifest: Path, output: Path) -> Path:
-    target = output / f"{SKILL_NAME}.zip"
+    output.mkdir(parents=True, exist_ok=True)
+    target = output / f"{SKILL_NAME}-v{version}.zip"
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for rel in files:
-            archive.write(root / rel, arcname=f"{SKILL_NAME}/{rel.as_posix()}")
-        archive.write(manifest, arcname=f"{SKILL_NAME}/MANIFEST.json")
+        for path in files:
+            archive.write(root / path, arcname=f"{SKILL_NAME}/{path.as_posix()}")
+        archive.writestr(
+            f"{SKILL_NAME}/MANIFEST.json",
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        )
     return target
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Package this skill for agent handoff.")
-    parser.add_argument("--output", default="dist", help="Output directory. Default: dist")
+    parser = argparse.ArgumentParser(description="Build the versioned skill installation ZIP.")
+    parser.add_argument("--output", default="packages", type=Path)
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
-    output = (root / args.output).resolve()
-    output.mkdir(parents=True, exist_ok=True)
-
-    files = collect_files(root)
-    manifest = write_manifest(root, files, output)
-    tar_path = make_tar(root, files, manifest, output)
-    zip_path = make_zip(root, files, manifest, output)
-
-    print(f"files: {len(files)}")
-    print(f"tar: {tar_path}")
-    print(f"zip: {zip_path}")
-    print(f"manifest: {manifest}")
+    target = build_package(root, (root / args.output).resolve())
+    print(f"package: {target}")
+    print(f"sha256: {digest(target)}")
     return 0
 
 

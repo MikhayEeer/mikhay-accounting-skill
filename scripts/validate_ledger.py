@@ -17,7 +17,7 @@ LIABILITY_ACCOUNTS = {"白条", "花呗", "美团月付", "抖音月付"}
 ASSET_ACCOUNTS = {"建设银行", "工商银行", "招商银行", "微信钱包", "支付宝", "美团"}
 ACCOUNTS = LIABILITY_ACCOUNTS | ASSET_ACCOUNTS
 ACCOUNT_KINDS = {"资产", "负债"}
-REQUIRED_RECORD = ["时间", "收支类型", "金额", "类别", "子类", "账户", "备注"]
+REQUIRED_RECORD = ["时间", "收支类型", "金额", "账户"]
 
 CATEGORY_MAP = {
     "食品餐饮": {"早餐", "午餐", "晚餐", "正餐", "外卖", "快餐", "小吃", "夜宵", "零食", "休闲零食", "水果", "生鲜", "饮料", "饮料酒水", "聚餐", "请客吃饭"},
@@ -56,12 +56,7 @@ def decimal_value(value: Any) -> Decimal | None:
 
 
 def load_file(path: Path) -> dict[str, Any]:
-    empty = {
-        "asset_snapshots": [],
-        "credit_accounts": [],
-        "installment_plans": [],
-        "repayment_reminders": [],
-    }
+    empty = {"asset_snapshots": []}
     if path.suffix.lower() == ".csv":
         with path.open("r", encoding="utf-8-sig", newline="") as f:
             return {"records": list(csv.DictReader(f)), **empty}
@@ -73,9 +68,6 @@ def load_file(path: Path) -> dict[str, Any]:
             return {
                 "records": data.get("records", data.get("transactions", [])),
                 "asset_snapshots": data.get("asset_snapshots", []),
-                "credit_accounts": data.get("credit_accounts", []),
-                "installment_plans": data.get("installment_plans", []),
-                "repayment_reminders": data.get("repayment_reminders", []),
             }
     raise SystemExit(f"Unsupported file type: {path}")
 
@@ -103,13 +95,20 @@ def validate_records(rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
         for field in REQUIRED_RECORD:
             if str(row.get(field, "")).strip() == "":
                 errors.append(f"{prefix}: missing {field}")
+        if not str(row.get("事件", row.get("备注", ""))).strip():
+            errors.append(f"{prefix}: missing 事件 (legacy 备注 is accepted)")
         tx_type = str(row.get("收支类型", "")).strip()
         amount = decimal_value(row.get("金额"))
         account = str(row.get("账户", "")).strip()
         category = str(row.get("类别", "")).strip()
         subcategory = str(row.get("子类", "")).strip()
-        norm_category, norm_subcategory, pair_warnings = normalize_pair(category, subcategory)
-        warnings.extend(f"{prefix}: {w}" for w in pair_warnings)
+        norm_category = category
+        norm_subcategory = subcategory
+        if bool(category) != bool(subcategory):
+            errors.append(f"{prefix}: 类别 and 子类 must both be set or both be omitted")
+        elif category:
+            norm_category, norm_subcategory, pair_warnings = normalize_pair(category, subcategory)
+            warnings.extend(f"{prefix}: {w}" for w in pair_warnings)
 
         if not is_datetime(row.get("时间")):
             errors.append(f"{prefix}: invalid 时间")
@@ -125,15 +124,15 @@ def validate_records(rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
             warnings.append(f"{prefix}: {tx_type} usually uses a positive 金额")
         if account not in ACCOUNTS:
             errors.append(f"{prefix}: invalid 账户 {account!r}")
-        if norm_category not in CATEGORY_MAP:
+        if category and norm_category not in CATEGORY_MAP:
             errors.append(f"{prefix}: invalid 类别 {category!r}")
-        elif norm_subcategory not in CATEGORY_MAP[norm_category]:
+        elif category and norm_subcategory not in CATEGORY_MAP[norm_category]:
             errors.append(f"{prefix}: invalid 子类 {subcategory!r} for 类别 {category!r}")
 
         expected_category = {"收入": "收入", "还款": "还款", "转账": "转账"}.get(tx_type)
-        if expected_category and norm_category != expected_category:
+        if category and expected_category and norm_category != expected_category:
             errors.append(f"{prefix}: 收支类型 {tx_type} should use 类别 {expected_category}")
-        if tx_type == "支出" and norm_category in {"收入", "还款", "转账"}:
+        if category and tx_type == "支出" and norm_category in {"收入", "还款", "转账"}:
             errors.append(f"{prefix}: 支出 cannot use 类别 {norm_category}")
     return errors, warnings
 
@@ -143,9 +142,11 @@ def validate_assets(rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     for i, row in enumerate(rows, 1):
         prefix = f"asset_snapshot[{i}]"
-        for field in ["时间", "账户", "金额"]:
+        for field in ["时间", "账户"]:
             if str(row.get(field, "")).strip() == "":
                 errors.append(f"{prefix}: missing {field}")
+        if str(row.get("余额", row.get("金额", ""))).strip() == "":
+            errors.append(f"{prefix}: missing 余额")
         if not is_datetime(row.get("时间")):
             errors.append(f"{prefix}: invalid 时间")
         if str(row.get("账户", "")).strip() not in ACCOUNTS:
@@ -153,7 +154,7 @@ def validate_assets(rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
         kind = str(row.get("账户类型", "")).strip()
         if kind and kind not in ACCOUNT_KINDS:
             errors.append(f"{prefix}: 账户类型 must be 资产 or 负债")
-        amount = decimal_value(row.get("金额"))
+        amount = decimal_value(row.get("余额", row.get("金额")))
         if amount is None:
             errors.append(f"{prefix}: 金额 must be numeric")
         elif kind == "资产" and amount < 0:
@@ -254,17 +255,8 @@ def main() -> int:
     data = load_file(args.file)
     errors, warnings = validate_records(data["records"])
     asset_errors, asset_warnings = validate_assets(data["asset_snapshots"])
-    credit_errors, credit_warnings = validate_credit_accounts(data["credit_accounts"])
-    installment_errors, installment_warnings = validate_installments(data["installment_plans"])
-    reminder_errors, reminder_warnings = validate_reminders(data["repayment_reminders"])
     errors.extend(asset_errors)
-    errors.extend(credit_errors)
-    errors.extend(installment_errors)
-    errors.extend(reminder_errors)
     warnings.extend(asset_warnings)
-    warnings.extend(credit_warnings)
-    warnings.extend(installment_warnings)
-    warnings.extend(reminder_warnings)
 
     if errors:
         print(f"INVALID: {args.file}")
@@ -281,9 +273,6 @@ def main() -> int:
     print(f"OK: {args.file}")
     print(f"records: {len(data['records'])}")
     print(f"asset_snapshots: {len(data['asset_snapshots'])}")
-    print(f"credit_accounts: {len(data['credit_accounts'])}")
-    print(f"installment_plans: {len(data['installment_plans'])}")
-    print(f"repayment_reminders: {len(data['repayment_reminders'])}")
     if warnings:
         print(f"warnings: {len(warnings)}")
         for warning in warnings[:20]:

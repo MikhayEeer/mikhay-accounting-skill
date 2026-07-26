@@ -1,63 +1,34 @@
 ---
 name: mikhay-accounting-skill
-description: Chinese personal accounting workflow for CSV/JSON/XLSX ledger, asset, and wishlist files. Use when the user asks to import, export, record, classify, validate, summarize, store, analyze records, or evaluate planned purchases with fields like 时间, 收支类型, 金额, 类别, 子类, 账户, 备注, tags, note; supports 支出, 收入, 还款, 转账, year/month shard layout, third-party bill conversion, account balances, credit debt, installment plans, repayment reminders, net asset statistics, pre-purchase wishlist pressure analysis, and monthly reports.
+description: "Record Chinese expenses, income, repayments, and transfers; maintain observed and inferred asset snapshots and credit schedules; or update an independent wishlist. Use for transaction, balance, debt, credit bill, due-date, installment, wanted-item, and purchased-item messages. Return terse confirmations."
 ---
 
-# Mikhay Accounting Skill
+# Mikhay Accounting
 
-Use this skill to work with a Chinese personal ledger directory. Keep answers concise.
+Classify each message:
 
-## Files To Read
+- **记账**: expense, income, completed repayment, or completed transfer.
+- **资产**: observed balance or debt, credit bill, due date, installment, or asset query.
+- **Wishlist**: wanted, purchased, or abandoned item.
 
-Read these files only as needed:
+Handle explicitly mixed messages module by module.
 
-- `schema.md`: Chinese CSV/JSON fields and validation rules.
-- `categories.md`: category, subcategory, and legacy alias rules.
-- `accounts.md`: account balance, liability, installment, repayment, and sync rules.
-- `storage.md`: year/month shard layout for large ledgers.
-- `wishlist.md`: pre-purchase wishlist schema and rules.
-- `import_rules.md`: third-party CSV/XLSX import mapping rules.
-- `scripts/import_ledger.py`: convert CSV/XLSX/JSON bills to standard JSON.
-- `scripts/export_ledger.py`: export standard JSON to CSV or normalized JSON.
-- `scripts/validate_ledger.py`: deterministic format checks.
-- `scripts/summarize_ledger.py`: 基础收入、支出、还款、转账、分类统计。
-- `scripts/summarize_assets.py`: 资产、负债、净资产、分期、还款提醒。
-- `scripts/analyze_wishlist.py`: 预购清单经济压力、购买建议、优先级。
+## 记账
 
-## Workflow
+- Append the record per `schema.md`.
+- Use the current time when omitted. Ask one short question if another required value is unavailable.
+- Rebuild `inferred_snapshot` as defined in `accounts.md`.
+- Reply only with `{账户} {收支类型} {金额} {时间} {事件}{备注块}`.
+- Let `data/preferences.json` override `assets/preferences.template.json`.
 
-1. Identify ledger files: `.csv`, `.xlsx`, or `.json`.
-2. Read `schema.md` before changing or validating data.
-3. Read `categories.md` before classifying transactions.
-4. Read `storage.md` before locating or writing real ledger files.
-5. Read `import_rules.md` before importing third-party bills.
-6. Never print full real ledgers unless the user asks.
-7. Import third-party files with `scripts/import_ledger.py <file> --split-by-month --year-dirs --output data/ledger`.
-8. Use `scripts/validate_ledger.py <file>` before trusting data.
-9. Use `scripts/summarize_ledger.py <file>` for quick statistics.
-10. Use `scripts/summarize_assets.py <json>` for total assets, debt, net assets, installments, and reminders.
-11. Use `scripts/analyze_wishlist.py <wishlist.json> --ledger <month.json> --assets <assets.json>` for planned purchases.
-12. Export with `scripts/export_ledger.py <json> --output exports/ledger.csv`.
-13. Mark uncertain classifications as `待确认`.
+## 资产
 
-## Data Rules
+- Apply reported balances per `accounts.md` and credit schedules per `credit.md`.
 
-- Main fields are `时间 / 收支类型 / 金额 / 类别 / 子类 / 账户 / 备注 / tags / note`.
-- `收支类型` must be one of: `支出`, `收入`, `还款`, `转账`.
-- Use signed `金额`: `支出` is negative; `收入`, `还款`, `转账` are positive.
-- `转账` 不计入收入或支出。
-- `还款` is separate from normal spending; display it as a positive total.
-- Ledger records should update asset statistics: spending lowers assets or raises debt; income raises assets; repayment lowers cash and debt; transfer moves money.
-- If direct asset edits differ from ledger-derived balances, report the difference and ask before creating an adjustment item.
-- Wishlist items are planned purchases, not ledger records; create a `支出` record only after purchase.
-- Prefer year/month shards like `data/ledger/2026/2026-06.json`; do not load all shards unless required.
-- Keep real data in ignored folders such as `data/`, `raw/`, or `exports/`.
+## Wishlist
 
-## Output Style
+- Update only the file defined in `wishlist.md`.
+- On purchase, update the item and record an expense when transaction details are available.
+- Reply only with the item and status.
 
-Return short results:
-
-- Totals first.
-- Then category highlights.
-- Then warnings or uncertain items.
-- Avoid long transaction dumps.
+Read `categories.md` only for categorization and `import_rules.md` only for third-party bill imports.
