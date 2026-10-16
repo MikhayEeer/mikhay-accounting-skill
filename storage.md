@@ -28,6 +28,8 @@ reports/
 ## Rules
 
 - Store transaction records by month: `data/ledger/YYYY/YYYY-MM.json`.
+- Or by day: `data/ledger/YYYY/YYYY-MM/YYYY-MM-DD.json`.
+- Shard keys come from `os.path.basename`. Do not slice the full path. `data/ledger/2026/2026-06.json` is month `2026-06`; a bad slice of that path produces `r/202`.
 - Store asset snapshots separately when they are not part of the monthly ledger: `data/assets/YYYY/YYYY-MM.assets.json`.
 - Store planned purchases separately: `data/wishlist/YYYY/wishlist.json`.
 - Keep raw third-party bills under `raw/YYYY/YYYY-MM/`.
@@ -40,4 +42,6 @@ reports/
 
 ```bash
 python scripts/import_ledger.py raw/bill.csv --split-by-month --year-dirs --output data/ledger
+python scripts/import_ledger.py raw/bill.csv --shard day --year-dirs --output data/ledger
+python scripts/import_ledger.py raw/bill.csv --shard month --year-dirs --output data/ledger
 ```

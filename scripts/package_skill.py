@@ -17,6 +17,8 @@ INCLUDE_DIRS = {"agents", "examples", "scripts"}
 INCLUDE_FILES = {
     ".gitignore",
     "README.md",
+    "CHANGELOG.md",
+    "VERSION",
     "HANDOFF.md",
     "SKILL.md",
     "schema.md",

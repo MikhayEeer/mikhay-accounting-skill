@@ -11,20 +11,23 @@ Use this folder as a self-contained accounting skill.
 5. Import third-party bills when needed:
 
 ```bash
-python scripts/import_ledger.py <bill.csv-or-xlsx> --split-by-month --year-dirs --output data/ledger
+python scripts/import_ledger.py <bill.csv-or-xlsx> --shard month --year-dirs --output data/ledger
 ```
 
-6. Run validation before statistics:
+6. Run validation before statistics. Totals must come from these scripts, never hand math:
 
 ```bash
-python scripts/validate_ledger.py <ledger.csv-or-json>
-python scripts/summarize_ledger.py <ledger.csv-or-json>
+python scripts/validate_ledger.py <ledger.csv-or-json-or-directory>
+python scripts/summarize_ledger.py <ledger-or-directory>
+python scripts/summarize_tags.py <ledger-directory>
 ```
 
 7. Query assets, debt, net assets, installments, and reminders when needed:
 
 ```bash
-python scripts/summarize_assets.py <ledger-or-assets.json>
+python scripts/summarize_assets.py <ledger-or-assets.json> --cc-method A
+python scripts/summarize_assets.py <ledger-or-assets.json> --forecast
+python scripts/project_assets.py <assets.json> <ledger.json>
 ```
 
 8. Analyze planned purchases when needed:
@@ -56,6 +59,7 @@ Private data should stay in ignored folders:
 Preferred ledger shards:
 
 - `data/ledger/YYYY/YYYY-MM.json`
+- `data/ledger/YYYY/YYYY-MM/YYYY-MM-DD.json`
 - `data/assets/YYYY/YYYY-MM.assets.json`
 - `data/wishlist/YYYY/wishlist.json`
 

@@ -22,7 +22,54 @@ python scripts/import_ledger.py raw/bill.csv --split-by-month --year-dirs --outp
 python scripts/export_ledger.py data/ledger/2026/2026-06.json --output exports/2026/2026-06.csv
 ```
 
-推荐真实账本按年月分片：`data/ledger/YYYY/YYYY-MM.json`。不要让 Agent 一次读取全部月份。
+推荐真实账本按年月分片：`data/ledger/YYYY/YYYY-MM.json`。按日分片：`data/ledger/YYYY/YYYY-MM/YYYY-MM-DD.json`。
+
+```bash
+python scripts/import_ledger.py raw/bill.csv --shard day --year-dirs --output data/ledger
+python scripts/import_ledger.py raw/bill.csv --shard month --year-dirs --output data/ledger
+```
+
+分片键只用文件名（`os.path.basename`）。`data/ledger/2026/2026-06.json` 的月份键是 `2026-06`。不要截取整段路径，否则会得到错误键 `r/202`。
+
+校验：
+
+```bash
+python scripts/validate_ledger.py data/ledger/2026/2026-06.json
+python scripts/validate_ledger.py data/ledger
+```
+
+## 花销与内部转账
+
+统计一律跑脚本，不要手算。脚本会扫描传入的全部分片。
+
+```bash
+python scripts/summarize_ledger.py data/ledger
+python scripts/summarize_ledger.py data/ledger --buckets examples/buckets.sample.json
+python scripts/summarize_tags.py data/ledger
+```
+
+两套口径：
+
+- **花销**：支出毛额减去退款。退款（`收支类型=退款` 或 `refund_of`）不是收入，也不算一笔新的消费。报表同时给出毛额和净额。
+- **内部转账**：账户之间的 `转账`。`pairid` 成对的两条腿只计一次。转账不进入花销。
+
+标签使用 `trip:`、`event:`、`person:`、`nature:`。`summarize_tags.py` 对每个标签给出毛额、净额、按日合计，以及类别行上的占比。
+
+可选字段还包括 `currency`（默认 CNY）、`original_amount`、`fx_rate`、`cny_amount`。合计使用人民币 `金额`。新写出的 JSON 带 `schema_version`。旧账本没有这些字段也能用。
+
+## 净资产、信用卡与发薪日
+
+```bash
+python scripts/summarize_assets.py data/assets/2026/2026-06.assets.json --cc-method A
+python scripts/summarize_assets.py data/assets/2026/2026-06.assets.json --forecast --as-of 2026-06-15
+python scripts/project_assets.py data/assets/assets.json data/ledger/2026/2026-06.json
+```
+
+账户有 `included` 和 `excluded`（备查）两种。净资产分成「计入净资产」和「备查账户」两段。备查示例：Apple Card、公积金、助学贷款、加密货币。
+
+信用卡余额默认用方法 A：最近快照 + 快照之后的流水。方法 B 从零重放该卡流水、不用快照。输出会写明用的是哪一种。
+
+`--forecast` 给出每张卡的预计账单和预计还款，并对照发薪日现金流。发薪日是当月最后一个工作日（周一至周五）。
 
 ## 资产模块
 
@@ -80,4 +127,10 @@ dist/mikhay-accounting-skill.zip
 - 速度：使用 skill 快约 5-10 倍，从可能需要纠错 2-3 轮变为一次跑通。
 - 质量：差距最大。纯 LLM 处理 197 笔金额求和与别名归一化，容易出现几百元误差；脚本是确定性的，零误差。
 
-如需长期记账（录入新交易、按月出报表、查异常），建议把本 skill 放到对应工具支持的 skill/配置目录下，按"读 schema、跑 validate、跑 summarize、只回报总数与异常"的固定管线执行，避免每次重新解释字段含义。
+如需长期记账（录入新交易、按月出报表、查异常），建议把本 skill 放到对应工具支持的 skill/配置目录下，按「读 schema、跑 validate、跑 summarize、只回报脚本给出的总数与异常」执行。标签、分类占比和净资产都由脚本扫描全部分片后给出，不要手算。
+
+测试：
+
+```bash
+python -m pytest -q
+```
