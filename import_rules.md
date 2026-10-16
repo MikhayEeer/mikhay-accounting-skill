@@ -22,7 +22,9 @@ Use `scripts/import_ledger.py` to convert third-party CSV/XLSX bills into the st
 - Preserve existing valid `类别/子类`.
 - Normalize known aliases from `categories.md`.
 - If no confident category is found, use `购物消费/日用百货` and append `待确认分类` to `note`.
-- Use signed amount rules from `schema.md`: `支出` is negative; `收入`, `还款`, `转账` are positive.
+- Use signed amount rules from `schema.md`: `支出` is negative; `收入`, `还款`, `退款` are positive. Legacy single-sided `转账` is positive. `pairid` legs are opposite signs.
+- A source value of `退款` becomes `收支类型=退款`, not income.
+- Keep `currency`, `original_amount`, `fx_rate`, `cny_amount`, `pairid`, `refund_of`, and `target_account` when the source has them. Default currency is `CNY`.
 - Do not overwrite existing ledger files unless the user asks.
 
 ## Commands
@@ -37,4 +39,5 @@ Split by month:
 
 ```bash
 python scripts/import_ledger.py raw/bill.csv --split-by-month --year-dirs --output data/ledger
+python scripts/import_ledger.py raw/bill.csv --shard day --year-dirs --output data/ledger
 ```

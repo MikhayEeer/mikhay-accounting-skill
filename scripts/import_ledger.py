@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from ledgerlib import SCHEMA_VERSION, shard_key
 from validate_ledger import (
     ACCOUNTS,
     CATEGORY_ALIASES,
@@ -26,7 +27,25 @@ from validate_ledger import (
 )
 
 
-FIELDS = ["时间", "收支类型", "金额", "类别", "子类", "账户", "备注", "tags", "note"]
+FIELDS = [
+    "时间",
+    "收支类型",
+    "金额",
+    "类别",
+    "子类",
+    "账户",
+    "备注",
+    "tags",
+    "note",
+    "id",
+    "refund_of",
+    "pairid",
+    "target_account",
+    "currency",
+    "original_amount",
+    "fx_rate",
+    "cny_amount",
+]
 DEFAULT_ACCOUNT_BY_SOURCE = {
     "alipay": "支付宝",
     "wechat": "微信钱包",
@@ -44,6 +63,14 @@ COLUMN_ALIASES = {
     "备注": ["备注", "商品", "商品说明", "交易对方", "商户", "摘要", "说明", "description", "note"],
     "tags": ["tags", "标签"],
     "note": ["note", "导入备注"],
+    "id": ["id", "交易单号"],
+    "refund_of": ["refund_of", "退款关联"],
+    "pairid": ["pairid", "配对号"],
+    "target_account": ["target_account", "目标账户", "对方账户"],
+    "currency": ["currency", "币种"],
+    "original_amount": ["original_amount", "原币金额"],
+    "fx_rate": ["fx_rate", "汇率"],
+    "cny_amount": ["cny_amount", "人民币金额"],
 }
 KEYWORD_RULES = [
     ("收入", "工资", ["工资", "薪资", "salary"]),
@@ -72,8 +99,11 @@ KEYWORD_RULES = [
     ("生活服务", "快递", ["快递", "邮费"]),
     ("生活服务", "超市", ["超市", "便利店"]),
     ("居家生活", "水费", ["水费"]),
+    ("居家生活", "电费", ["电费"]),
     ("居家生活", "住宿", ["住宿", "房租"]),
+    ("出行交通", "维修", ["维修", "保养"]),
     ("休闲娱乐", "游戏", ["游戏"]),
+    ("休闲娱乐", "KTV", ["KTV", "卡拉OK", "卡拉 OK"]),
     ("休闲娱乐", "旅游度假", ["旅游", "度假"]),
 ]
 
@@ -195,6 +225,8 @@ def normalize_time(value: str) -> str:
 def normalize_type(raw_type: str, amount: Decimal | None, text: str) -> str:
     raw = raw_type.lower()
     text_lower = text.lower()
+    if "退款" in raw or (not raw and "退款" in text_lower):
+        return "退款"
     if "还款" in raw:
         return "还款"
     if any(word in raw for word in ["转账", "提现", "不计收支"]):
@@ -230,6 +262,12 @@ def classify(row: dict[str, Any], tx_type: str, text: str, account: str) -> tupl
     category, subcategory = normalize_pair(raw_category, raw_subcategory)
     if category in CATEGORY_MAP and subcategory in CATEGORY_MAP[category]:
         return category, subcategory, False
+    if tx_type == "退款":
+        lowered = text.lower()
+        for category, subcategory, keywords in KEYWORD_RULES:
+            if category not in {"收入"} and any(keyword.lower() in lowered for keyword in keywords):
+                return category, subcategory, False
+        return "退款", "退款", False
     if tx_type == "收入":
         for category, subcategory, keywords in KEYWORD_RULES:
             if category == "收入" and any(k.lower() in text.lower() for k in keywords):
@@ -270,6 +308,16 @@ def normalize_record(row: dict[str, Any], source: str, fallback_account: str | N
         amount = Decimal("0")
     tx_type = normalize_type(get_value(row, "收支类型"), amount, text)
     signed_amount = -abs(amount) if tx_type == "支出" else abs(amount)
+    currency = get_value(row, "currency").upper() or "CNY"
+    original_amount = parse_amount(get_value(row, "original_amount"))
+    fx_rate = parse_amount(get_value(row, "fx_rate"))
+    cny_amount = parse_amount(get_value(row, "cny_amount"))
+    if original_amount is not None:
+        original_amount = -abs(original_amount) if tx_type == "支出" else abs(original_amount)
+    if currency != "CNY" and original_amount is not None and fx_rate is not None:
+        signed_amount = (original_amount * fx_rate).quantize(Decimal("0.01"))
+    elif cny_amount is not None and currency != "CNY":
+        signed_amount = -abs(cny_amount) if tx_type == "支出" else abs(cny_amount)
     account = normalize_account(get_value(row, "账户"), source, fallback_account)
     category, subcategory, pending = classify(row, tx_type, text, account)
     note_parts = []
@@ -280,7 +328,7 @@ def normalize_record(row: dict[str, Any], source: str, fallback_account: str | N
         note_parts.append(f"source={source}")
     if pending:
         note_parts.append("待确认分类")
-    return {
+    record = {
         "时间": normalize_time(get_value(row, "时间")),
         "收支类型": tx_type,
         "金额": float(signed_amount) if signed_amount % 1 else int(signed_amount),
@@ -291,6 +339,20 @@ def normalize_record(row: dict[str, Any], source: str, fallback_account: str | N
         "tags": get_value(row, "tags"),
         "note": "; ".join(note_parts),
     }
+    for field in ("id", "refund_of", "pairid", "target_account"):
+        value = get_value(row, field)
+        if value:
+            record[field] = value
+    if currency and currency != "CNY":
+        record["currency"] = currency
+        if original_amount is not None:
+            record["original_amount"] = float(original_amount) if original_amount % 1 else int(original_amount)
+        if fx_rate is not None:
+            record["fx_rate"] = float(fx_rate) if fx_rate % 1 else int(fx_rate)
+        record["cny_amount"] = record["金额"]
+    elif get_value(row, "currency"):
+        record["currency"] = "CNY"
+    return record
 
 
 def month_of(record: dict[str, Any]) -> str:
@@ -299,7 +361,7 @@ def month_of(record: dict[str, Any]) -> str:
 
 def write_json(path: Path, records: list[dict[str, Any]], month: str | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"month": month or "mixed", "records": records}
+    payload = {"schema_version": SCHEMA_VERSION, "month": month or "mixed", "records": records}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
@@ -312,10 +374,27 @@ def output_path_for(args: argparse.Namespace, records: list[dict[str, Any]]) -> 
     return Path("data") / "imported.json"
 
 
-def monthly_output_path(out_dir: Path, month: str, year_dirs: bool) -> Path:
+def record_shard_key(record: dict[str, Any], mode: str) -> str:
+    text = str(record.get("时间", ""))
+    if mode == "day":
+        return text[:10]
+    return text[:7]
+
+
+def shard_output_path(out_dir: Path, key: str, year_dirs: bool, mode: str) -> Path:
+    # The filename itself is the shard key so os.path.basename can recover it.
+    filename = f"{key}.json"
+    if mode == "day":
+        if year_dirs:
+            return out_dir / key[:4] / key[:7] / filename
+        return out_dir / filename
     if year_dirs:
-        return out_dir / month[:4] / f"{month}.json"
-    return out_dir / f"{month}.json"
+        return out_dir / key[:4] / filename
+    return out_dir / filename
+
+
+def monthly_output_path(out_dir: Path, month: str, year_dirs: bool) -> Path:
+    return shard_output_path(out_dir, month, year_dirs, "month")
 
 
 def main() -> int:
@@ -326,11 +405,16 @@ def main() -> int:
     parser.add_argument("--account", help="Fallback account when the source file has no account column.")
     parser.add_argument("--month", help="Only import records whose 时间 starts with YYYY-MM.")
     parser.add_argument("--split-by-month", action="store_true", help="Write one JSON file per month.")
-    parser.add_argument("--year-dirs", action="store_true", help="With --split-by-month, write files as <output>/YYYY/YYYY-MM.json.")
+    parser.add_argument("--shard", choices=["day", "month"], help="Write one JSON file per day or month. Keys use the file basename.")
+    parser.add_argument("--year-dirs", action="store_true", help="Nest shard files under YYYY/ (and YYYY-MM/ for days).")
     args = parser.parse_args()
 
-    if args.year_dirs and not args.split_by_month:
-        raise SystemExit("--year-dirs requires --split-by-month")
+    if args.split_by_month and args.shard == "day":
+        raise SystemExit("--split-by-month cannot be combined with --shard day")
+    if args.split_by_month and args.shard is None:
+        args.shard = "month"
+    if args.year_dirs and not args.shard:
+        raise SystemExit("--year-dirs requires --split-by-month or --shard")
     if args.account and args.account not in ACCOUNTS:
         raise SystemExit(f"Invalid fallback account: {args.account}")
     rows = load_rows(args.input)
@@ -343,15 +427,18 @@ def main() -> int:
         for error in errors[:50]:
             print(f"- {error}", file=sys.stderr)
         return 1
-    if args.split_by_month:
+    if args.shard:
         out_dir = Path(args.output or "data")
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for record in records:
-            grouped[month_of(record)].append(record)
-        for month, month_records in sorted(grouped.items()):
-            out = monthly_output_path(out_dir, month, args.year_dirs)
-            write_json(out, month_records, month)
-            print(f"wrote {out} records={len(month_records)} warnings={len(warnings)}")
+            grouped[record_shard_key(record, args.shard)].append(record)
+        for key, shard_records in sorted(grouped.items()):
+            out = shard_output_path(out_dir, key, args.year_dirs, args.shard)
+            write_json(out, shard_records, key if args.shard == "month" else key[:7])
+            written_key = shard_key(out, args.shard)
+            if written_key != key:
+                raise SystemExit(f"shard key mismatch for {out}: basename key {written_key!r} != {key!r}")
+            print(f"wrote {out} records={len(shard_records)} shard={written_key} warnings={len(warnings)}")
         return 0
     out = output_path_for(args, records)
     write_json(out, records, args.month or (month_of(records[0]) if records else None))

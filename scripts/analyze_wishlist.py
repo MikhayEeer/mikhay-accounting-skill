@@ -103,10 +103,12 @@ def ledger_context(paths: list[Path]) -> tuple[Decimal | None, Decimal, Decimal,
         for row in load_ledger(path):
             tx_type = str(row.get("收支类型", "")).strip()
             amount = abs(money(row.get("金额")))
-            if tx_type:
+            if str(row.get("refund_of", "")).strip():
+                totals["退款"] += amount
+            elif tx_type:
                 totals[tx_type] += amount
     income = totals["收入"]
-    expense = totals["支出"]
+    expense = totals["支出"] - totals["退款"]
     repayment = totals["还款"]
     return income - expense - repayment, income, expense, repayment
 

@@ -8,6 +8,15 @@ real/
 # Local generated reports
 reports/
 dist/
+packages/
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
 *.local.csv
 *.local.json
 *.private.csv

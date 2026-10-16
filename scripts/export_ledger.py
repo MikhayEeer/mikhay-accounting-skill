@@ -9,8 +9,28 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ledgerlib import SCHEMA_VERSION
 
-FIELDS = ["时间", "收支类型", "金额", "类别", "子类", "账户", "备注", "tags", "note"]
+
+FIELDS = [
+    "时间",
+    "收支类型",
+    "金额",
+    "类别",
+    "子类",
+    "账户",
+    "备注",
+    "tags",
+    "note",
+    "id",
+    "refund_of",
+    "pairid",
+    "target_account",
+    "currency",
+    "original_amount",
+    "fx_rate",
+    "cny_amount",
+]
 
 
 def load_records(path: Path) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
@@ -42,6 +62,7 @@ def export_csv(path: Path, records: list[dict[str, Any]]) -> None:
 def export_json(path: Path, month: str, records: list[dict[str, Any]], source: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
+        "schema_version": str(source.get("schema_version") or SCHEMA_VERSION),
         "month": month,
         "records": records,
     }
@@ -53,6 +74,8 @@ def export_json(path: Path, month: str, records: list[dict[str, Any]], source: d
         payload["installment_plans"] = source["installment_plans"]
     if source.get("repayment_reminders"):
         payload["repayment_reminders"] = source["repayment_reminders"]
+    if source.get("account_policy"):
+        payload["account_policy"] = source["account_policy"]
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
