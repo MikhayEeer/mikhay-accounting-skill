@@ -11,8 +11,8 @@
       "子类": "正餐",
       "账户": "花呗",
       "备注": "聚餐",
-      "tags": ["trip:shanghai", "person:li"],
-      "note": "",
+      "tags": ["trip:demo", "person:demo"],
+      "note": "虚构示例",
       "currency": "CNY"
     },
     {
@@ -24,8 +24,8 @@
       "子类": "正餐",
       "账户": "花呗",
       "备注": "退回一笔",
-      "tags": "trip:shanghai",
-      "note": "",
+      "tags": "trip:demo",
+      "note": "虚构示例",
       "refund_of": "exp-1"
     },
     {

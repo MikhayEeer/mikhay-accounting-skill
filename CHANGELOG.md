@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.1 - 2026-10-16
+
+Documentation only. Ledger scripts and `schema_version` stay at `0.2.0`.
+
+### Added
+
+- `references/faq.md` lists common mistakes and the correct recording rules.
+- `references/troubleshooting.md` classifies missing fields, bad formats, validation failures, missing files, corrupt JSON, and retries.
+- `references/triggers.md` gives ten user phrases with the module and the reply shape.
+- `references/design-rationale.md` explains snapshots versus inferred balances, and why refunds are not income.
+- End-to-end workflows in `examples/workflow-import-monthly.md`, `examples/workflow-credit-repay.md`, and `examples/workflow-fix-records.md`.
+
+### Changed
+
+- Skill version is `0.2.1` in `SKILL.md` frontmatter (`slug`, `displayName`, `version`, `summary`). The `VERSION` file is removed so the package version has one source.
+- `SKILL.md` now states what this skill does not do, and points at the reference files instead of only listing trigger keywords.
+- MIT `LICENSE`, copyright MikhayEeer. README includes the license and `npx skills add MikhayEeer/mikhay-accounting-skill`.
+- Sample ledgers use round fictional amounts and say `虚构示例`. The placeholder tag is `person:demo`.
+
 ## 0.2.0 - 2026-10-16
 
 Ledger scripts now scan shards for totals, and existing books that only use the original fields stay valid.
