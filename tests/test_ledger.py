@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import zipfile
 from datetime import date
 from pathlib import Path
 
@@ -409,8 +410,28 @@ def test_extended_example_and_docs() -> None:
     assert "花销" in readme and "内部转账" in readme
     assert "维修" in categories and "电费" in categories and "KTV" in categories
     assert (ROOT / "CHANGELOG.md").exists()
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "0.2.0"
+    assert not (ROOT / "VERSION").exists()
+    frontmatter = skill.split("---", 2)[1]
+    assert "version: 0.2.1" in frontmatter
+    assert "slug: mikhay-accounting-skill" in frontmatter
+    body = skill.split("---", 2)[2]
+    assert len(body.splitlines()) <= 160
+    for name in ("faq.md", "troubleshooting.md", "triggers.md", "design-rationale.md"):
+        assert (ROOT / "references" / name).exists()
     assert (ROOT / ".github" / "workflows" / "ci.yml").exists()
+
+
+def test_package_omits_version_file_tests_and_github(tmp_path: Path) -> None:
+    result = run("package_skill.py", "--output", str(tmp_path))
+    assert result.returncode == 0, result.stdout + result.stderr
+    archive = zipfile.ZipFile(tmp_path / "mikhay-accounting-skill.zip")
+    names = [name.replace("\\", "/") for name in archive.namelist()]
+    assert not any(name.endswith("/VERSION") or name.rsplit("/", 1)[-1] == "VERSION" for name in names)
+    assert not any("/tests/" in f"/{name}" or "/.github/" in f"/{name}" for name in names)
+    assert any(name.endswith("references/faq.md") for name in names)
+    assert any(name.endswith("examples/workflow-credit-repay.md") for name in names)
+    manifest = json.loads(archive.read("mikhay-accounting-skill/MANIFEST.json"))
+    assert manifest["version"] == "0.2.1"
 
 
 def test_wishlist_still_runs() -> None:

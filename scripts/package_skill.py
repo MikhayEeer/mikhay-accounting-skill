@@ -13,12 +13,11 @@ from pathlib import Path
 
 
 SKILL_NAME = "mikhay-accounting-skill"
-INCLUDE_DIRS = {"agents", "examples", "scripts"}
+INCLUDE_DIRS = {"agents", "examples", "references", "scripts"}
 INCLUDE_FILES = {
     ".gitignore",
     "README.md",
     "CHANGELOG.md",
-    "VERSION",
     "HANDOFF.md",
     "SKILL.md",
     "schema.md",
@@ -30,6 +29,7 @@ INCLUDE_FILES = {
 }
 EXCLUDE_PARTS = {
     ".git",
+    ".github",
     ".claude",
     ".codex",
     "__pycache__",
@@ -40,6 +40,7 @@ EXCLUDE_PARTS = {
     "real",
     "reports",
     "dist",
+    "tests",
 }
 
 
@@ -72,9 +73,21 @@ def collect_files(root: Path) -> list[Path]:
     return files
 
 
+def skill_version(root: Path) -> str:
+    text = (root / "SKILL.md").read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        raise SystemExit("SKILL.md missing frontmatter")
+    front = text.split("---", 2)[1]
+    for line in front.splitlines():
+        if line.startswith("version:"):
+            return line.split(":", 1)[1].strip().strip("\"'")
+    raise SystemExit("SKILL.md frontmatter missing version")
+
+
 def write_manifest(root: Path, files: list[Path], output: Path) -> Path:
     manifest = {
         "name": SKILL_NAME,
+        "version": skill_version(root),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files": [
             {"path": str(path).replace("\\", "/"), "sha256": digest(root / path)}

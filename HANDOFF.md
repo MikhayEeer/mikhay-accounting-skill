@@ -1,10 +1,10 @@
 # Agent Handoff
 
-Use this folder as a self-contained accounting skill.
+Use this folder as a self-contained accounting skill. Skill version `0.2.1` lives in `SKILL.md` frontmatter. Ledger `schema_version` stays `0.2.0`.
 
 ## Start
 
-1. Read `SKILL.md`.
+1. Read `SKILL.md`. When a record looks wrong, read `references/faq.md`. When a command fails, read `references/troubleshooting.md`.
 2. Read `schema.md` before editing ledger data.
 3. Read `categories.md` before classifying records.
 4. Read `storage.md` before locating or writing real ledger files.

@@ -1,88 +1,104 @@
 ---
+slug: mikhay-accounting-skill
+displayName: "Mikhay 记账"
+version: 0.2.1
+summary: "中文个人记账。流水、资产快照、信用卡和愿望清单分开存放；合计只抄脚本；退款不是收入。"
 name: mikhay-accounting-skill
 description: Chinese personal accounting workflow for CSV/JSON/XLSX ledger, asset, and wishlist files. Use when the user asks to import, export, record, classify, validate, summarize, store, analyze records, or evaluate planned purchases with fields like 时间, 收支类型, 金额, 类别, 子类, 账户, 备注, tags, note; supports 支出, 收入, 还款, 转账, 退款, trip/event/person/nature tags, day or month shards, refunds, transfer pairs, multi-currency CNY totals, included and excluded accounts, credit-card snapshot methods, payday forecast, third-party bill conversion, and monthly reports.
 ---
 
-# Mikhay Accounting Skill
+# Mikhay 记账
 
-Use this skill to work with a Chinese personal ledger directory. Keep answers concise.
+技能版本 `0.2.1`。账本字段 `schema_version` 仍是 `0.2.0`，那是数据格式号。合计必须来自脚本，never hand math。没跑脚本就不要报数字。
 
-## Hard Rule: Totals
+## 不做什么
 
-Totals must come from scripts scanning everything, never hand math.
+- 不把退款记成收入，不把转账或还款记成花销。
+- 购买前不把愿望清单写成 `支出`，也不替用户估价格。
+- 不主动做预算、投资或消费建议。
+- 不静默改分类、不覆盖已有分片、不在用户没要求时写差额调整。
+- 不手算合计，不跳过范围内的分片。
 
-That includes tag totals, category percentages, gross and net spending, refunds, transfers, and net worth. Run the script on the directory (or on every shard in scope). Do not add a sample of rows yourself, and do not skip a shard because it looks small.
+取舍见 `references/design-rationale.md`。
 
-- `scripts/summarize_ledger.py` for 花销 and 内部转账.
-- `scripts/summarize_tags.py` for every tag total. It always scans the whole tree it is given.
-- `scripts/summarize_assets.py` for included net worth, 备查 balances, card method, and `--forecast`.
-- `scripts/validate_ledger.py` before trusting a file.
+## 30 秒上手
 
-If a script was not run, do not invent a number.
+1. 没有 `data/` 时按 `storage.md` 建空目录，不要编造余额。
+2. 改数据前读 `schema.md`；分类前读 `categories.md`。
+3. `scripts/validate_ledger.py` 通过后再汇总。
+4. 回复先给脚本总数，再给警告和下一步。
 
-## Files To Read
+## 触发示例
 
-Read these files only as needed:
+原话决定模块。对话全文在 `references/triggers.md`。
 
-- `schema.md`: Chinese CSV/JSON fields and validation rules.
-- `categories.md`: category, subcategory, and legacy alias rules.
-- `accounts.md`: inclusion flag, balances, credit-card methods, forecast, installments.
-- `storage.md`: day/month shard layout. Shard keys use the file basename.
-- `wishlist.md`: pre-purchase wishlist schema and rules.
-- `import_rules.md`: third-party CSV/XLSX import mapping rules.
-- `scripts/import_ledger.py`: convert CSV/XLSX/JSON bills to standard JSON.
-- `scripts/export_ledger.py`: export standard JSON to CSV or normalized JSON.
-- `scripts/validate_ledger.py`: deterministic format checks.
-- `scripts/summarize_ledger.py`: 花销毛额/净额、内部转账、分类占比。
-- `scripts/summarize_tags.py`: scan every shard; per-tag gross, net, day, and category share.
-- `scripts/summarize_assets.py`: included and excluded net worth, card method, forecast.
-- `scripts/project_assets.py`: inferred balances from the latest observed snapshot plus later records.
-- `scripts/analyze_wishlist.py`: 预购清单经济压力、购买建议、优先级。
+1. 「午饭 35，微信」→ 记账 → `支出`，金额 `-35`，`食品餐饮/午餐`，账户 `微信钱包`。
+2. 「昨天午饭退了 10」→ 记账 → `退款` `+10`，`refund_of` 指向原支出；不记收入。
+3. 「支付宝还花呗 500」→ 记账 → `还款` `+500`，`note` 写 `target_account=花呗`。
+4. 「建行转支付宝 200」→ 记账 → 两条 `转账`，同一 `pairid`，金额一负一正。
+5. 「这个月花了多少」→ 汇总 → 只跑该月分片，报花销毛额、退款、净额。
+6. 「导入这份支付宝账单」→ 导入 → `import_ledger.py` 后校验；已有分片先问再覆盖。
+7. 「建行余额现在是 8000」→ 资产 → 追加快照；和推算不一致就先报差额。
+8. 「想买机械键盘，399」→ 愿望清单 → 只写 wishlist，不写账本。
+9. 「发薪日前花呗要还多少」→ 预测 → `summarize_assets.py --forecast`，写明算法和发薪日。
+10. 「这次旅行花了多少」→ 标签 → `summarize_tags.py` 扫完全部分片，报毛额和净额。
 
-## Workflow
+## 常见陷阱
 
-1. Identify ledger files: `.csv`, `.xlsx`, or `.json`.
-2. Read `schema.md` before changing or validating data.
-3. Read `categories.md` before classifying transactions.
-4. Read `storage.md` before locating or writing real ledger files.
-5. Read `import_rules.md` before importing third-party bills.
-6. Never print full real ledgers unless the user asks.
-7. Import third-party files with `scripts/import_ledger.py <file> --shard month --year-dirs --output data/ledger`.
-8. Use `scripts/validate_ledger.py <file-or-directory>` before trusting data.
-9. Use `scripts/summarize_ledger.py <file-or-directory>` for statistics. Pass `--buckets buckets.json` only when a bucket file exists.
-10. Use `scripts/summarize_tags.py <ledger-directory>` for tag totals. Do not total tags by hand.
-11. Use `scripts/summarize_assets.py <json> --cc-method A` for net worth. Add `--forecast` when the user asks about card bills or payday.
-12. Use `scripts/analyze_wishlist.py <wishlist.json> --ledger <month.json> --assets <assets.json>` for planned purchases.
-13. Export with `scripts/export_ledger.py <json> --output exports/ledger.csv`.
-14. Mark uncertain classifications as `待确认`.
+细节在 `references/faq.md`，恢复步骤在 `references/troubleshooting.md`。
 
-## Data Rules
+- 退款写成了 `收入`。改成 `退款` 正数，不要进收入合计。
+- `pairid` 只有一条。补上另一条，金额相反、账户不同；或改成单边并写 `target_account=`。
+- 外币对不上。`金额` 用人民币，且等于 `original_amount * fx_rate`（误差 0.01 以内）。
+- 类别不在枚举里。不要新造类别；备注写 `待确认`。导入才落到 `购物消费/日用百货`。
+- 没有 `data/`、JSON 损坏，或同一账单导入了两次。先停写，说清原因，再问下一步。
 
-- Main fields are `时间 / 收支类型 / 金额 / 类别 / 子类 / 账户 / 备注 / tags / note`.
-- `收支类型` must be one of: `支出`, `收入`, `还款`, `转账`, `退款`.
-- Use signed `金额` in CNY: `支出` is negative; `收入`, `还款`, `退款` are positive. Legacy `转账` is positive. `pairid` legs are opposite signs.
-- Optional currency columns are `currency`, `original_amount`, `fx_rate`, `cny_amount`. Missing currency means `CNY`. Totals use `金额`.
-- Tags should use `trip:`, `event:`, `person:`, or `nature:`. Bare legacy tags are allowed with a warning.
-- `退款` reduces 花销. It is not income. `refund_of` points at the original `支出` id when that id is known.
-- `转账` is 内部转账, not 花销. Prefer two `pairid` legs. A note `target_account=` remains valid for a single-sided transfer.
-- 花销口径 is gross spending minus refunds. 内部转账口径 counts each pair once. Reports show both.
-- `还款` is separate from normal spending; display it as a positive total.
-- Accounts are `included` or `excluded` (备查). Excluded examples include Apple Card, 公积金, 助学贷款, and 加密货币. Net worth prints the two groups separately.
-- Credit cards default to snapshot method A (last snapshot plus post-snapshot records). Method B replays the card from zero. The script output names the method.
-- New JSON files carry `schema_version`. Older files without it remain valid.
-- Ledger records should update asset statistics: spending lowers assets or raises debt; income raises assets; repayment lowers cash and debt; refunds reverse the original effect; transfer moves money.
-- If direct asset edits differ from ledger-derived balances, report the difference and ask before creating an adjustment item.
-- Wishlist items are planned purchases, not ledger records; create a `支出` record only after purchase.
-- Prefer shards like `data/ledger/2026/2026-06.json` or `data/ledger/2026/2026-06/2026-06-01.json`.
-- For a total, the script must scan every shard in scope. For a question about one month, pass that month only and say so.
-- Keep real data in ignored folders such as `data/`, `raw/`, or `exports/`.
+## 错误处理
 
-## Output Style
+出错时不要只回「已记录」或「有问题」。说明类别、原因、卡住的字段或路径，以及下一步。完整分类见 `references/troubleshooting.md`。
 
-Return short results:
+- 缺字段：列出缺项并提问，不要用空字符串凑记录。
+- 格式错误：指出哪个值和 `schema.md` 不符，并给出改后的样子。
+- 校验失败：贴出 `INVALID` 的第一条原因，改完再跑 `validate_ledger.py`。
+- 找不到文件：说明路径不存在。按 `storage.md` 建空目录，不要编余额。
+- 文件损坏：引用 JSON 解析错误。保留坏文件，不覆盖；从 `raw/` 重导或请用户确认后再替换。
+- 重试：校验和汇总可以重跑。导入和 `--write` 会写文件，输入没改或用户没同意覆盖时不要重跑。同一条 `INVALID` 重复出现就停。
 
-- Totals first, copied from the script.
-- Then category highlights, including the script's percentage.
-- Then which card method or forecast payday was used, when assets were queried.
-- Then warnings or uncertain items.
-- Avoid long transaction dumps.
+## 按需阅读
+
+- 字段和符号：`schema.md`。定位或写入分片：`storage.md`。
+- 分类：`categories.md`。余额、信用卡、发薪日：`accounts.md`。
+- 第三方账单：`import_rules.md`。愿望清单：`wishlist.md`。
+- 常见错误：`references/faq.md`。报错和恢复：`references/troubleshooting.md`。
+- 设计取舍：`references/design-rationale.md`。示例对话：`references/triggers.md`。
+- 端到端：`examples/workflow-import-monthly.md`、`examples/workflow-credit-repay.md`、`examples/workflow-fix-records.md`。
+
+## 脚本
+
+- `scripts/summarize_ledger.py`：花销和内部转账。
+- `scripts/summarize_tags.py`：标签合计，扫完整棵给定目录。
+- `scripts/summarize_assets.py`：计入净资产、备查、`--cc-method`、`--forecast`。
+- `scripts/project_assets.py`：最近快照加上之后的流水，得到推算余额。
+- `scripts/validate_ledger.py`：相信文件之前先跑。
+- `scripts/import_ledger.py <file> --shard month --year-dirs --output data/ledger`：转到标准 JSON。目标分片已存在时先问用户。
+- `scripts/export_ledger.py`：导出 CSV。`scripts/analyze_wishlist.py`：购买压力。
+
+## 数据规则
+
+- `收支类型` 只接受 `支出`、`收入`、`还款`、`转账`、`退款`。
+- `支出` 为负；`收入`、`还款`、`退款` 为正。成对转账一正一负。
+- 花销净额 = 支出毛额减退款。内部转账每对只计一次。两套口径都要报。
+- 缺币种即 `CNY`。合计只用人民币 `金额`。
+- 标签用 `trip:`、`event:`、`person:`、`nature:`。裸标签只警告。
+- 账户分 `included` 与 `excluded`（备查）。净资产分开打印。
+- 信用卡默认方法 A（最近快照 + 快照后流水）。输出要写明算法。
+- 新 JSON 写 `schema_version` `0.2.0`。旧文件没有该字段也有效。
+- 直接改快照时，若和推算不一致，先报差额，再问要不要调整。
+
+## 回复
+
+- 先抄脚本总数，再写类别要点和占比。
+- 查过资产就写明信用卡算法或发薪日。
+- 警告和 `待确认` 单独列出。
+- 失败时写原因和下一步，不要只做简短确认。
+- 用户没要时不要倾倒全部流水。

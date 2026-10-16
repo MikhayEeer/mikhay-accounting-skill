@@ -1,6 +1,8 @@
 # Mikhay Accounting Skill
 
-Chinese personal accounting workflow for CSV/JSON ledger files.
+技能版本 `0.2.1`（见 `SKILL.md` frontmatter）。账本 `schema_version` 仍是 `0.2.0`。
+
+Chinese personal accounting workflow for CSV/JSON ledger files. 常见错误见 `references/faq.md`，报错恢复见 `references/troubleshooting.md`。
 
 ## 导入导出
 
@@ -106,7 +108,7 @@ dist/mikhay-accounting-skill.tar.gz
 dist/mikhay-accounting-skill.zip
 ```
 
-包内只包含 skill、导入规则、脚本和脱敏示例，不包含 `data/`、`raw/`、`exports/`、`.claude/`、`.codex/` 等真实数据或本地配置。
+包内包含 skill、参考文档、导入规则、脚本和脱敏示例，不包含 `VERSION`、`tests/`、`.github/`、`data/`、`raw/`、`exports/`、`.claude/`、`.codex/`。技能版本写在包内 `MANIFEST.json`，与 `SKILL.md` 的 `version` 相同。
 
 ## 记账场景：使用 skill 与不使用 skill 的对比
 
@@ -114,7 +116,7 @@ dist/mikhay-accounting-skill.zip
 
 | 维度 | 不使用 skill（纯 LLM 推理） | 使用 skill（脚本 + 短指令） |
 |---|---|---|
-| 输入 token | 需将 schema、类别表、规则口头说明给模型，或模型靠记忆推理，约 2-4k token 规则加上全量记录约 15k token | 只读 SKILL.md（约 400 token），按需读 schema 与 categories（约 1k） |
+| 输入 token | 需将 schema、类别表、规则口头说明给模型，或模型靠记忆推理，约 2-4k token 规则加上全量记录约 15k token | 先读 SKILL.md，再按需打开 schema、categories 或 references |
 | 推理 token | 197 条逐条分类、求和、别名归一化，输出长且易错，约 8-15k 输出 token | 几乎不推理，只发 2 条 Bash 命令 |
 | 输出 token | 完整报表手写，约 1-2k | 脚本结果，约 300-500 token |
 | 延迟 | 单轮 30s 到 1min 以上，多轮纠错更久 | 2 次 Bash 调用，约 3-8s |
