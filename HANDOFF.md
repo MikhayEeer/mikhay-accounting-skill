@@ -1,6 +1,6 @@
 # Agent Handoff
 
-Use this folder as a self-contained accounting skill. Skill version `0.2.1` lives in `SKILL.md` frontmatter. Ledger `schema_version` stays `0.2.0`.
+Use this folder as a self-contained accounting skill. Skill version `0.2.2` lives in `SKILL.md` frontmatter. Ledger `schema_version` stays `0.2.0`. Homepage: https://github.com/MikhayEeer/mikhay-accounting-skill. The ledger stays on the local machine and is not uploaded. This skill is for Chinese personal ledgers.
 
 ## Start
 
@@ -13,6 +13,8 @@ Use this folder as a self-contained accounting skill. Skill version `0.2.1` live
 ```bash
 python scripts/import_ledger.py <bill.csv-or-xlsx> --shard month --year-dirs --output data/ledger
 ```
+
+If any target shard already exists, the script aborts the whole batch and writes nothing. Back up `data/` before re-running with `--overwrite`. That flag replaces each target file and can drop records missing from the new bill.
 
 6. Run validation before statistics. Totals must come from these scripts, never hand math:
 
@@ -65,10 +67,10 @@ Preferred ledger shards:
 
 ## Package
 
-Create a handoff bundle:
+Maintainer-only. `tools/package_skill.py` is not part of the end-user skill. ClawHub publish ignores `tools/` (`.clawhubignore`), and the archive omits `tools/` and `package_skill.py`.
 
 ```bash
-python scripts/package_skill.py
+python tools/package_skill.py
 ```
 
 Share files from `dist/`.

@@ -403,6 +403,7 @@ def test_extended_example_and_docs() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme_zh = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
     categories = (ROOT / "categories.md").read_text(encoding="utf-8")
     assert "never hand math" in skill
     assert "summarize_tags.py" in skill
@@ -412,27 +413,144 @@ def test_extended_example_and_docs() -> None:
     assert (ROOT / "CHANGELOG.md").exists()
     assert not (ROOT / "VERSION").exists()
     frontmatter = skill.split("---", 2)[1]
-    assert "version: 0.2.1" in frontmatter
+    assert "version: 0.2.2" in frontmatter
+    assert 'displayName: "Mikhay 记账 - 资产管理/信用卡/预购清单/年月统计"' in frontmatter
+    assert "homepage: https://github.com/MikhayEeer/mikhay-accounting-skill" in frontmatter
     assert "slug: mikhay-accounting-skill" in frontmatter
+    assert "--overwrite" in skill
+    assert "不会上传" in skill
     body = skill.split("---", 2)[2]
     assert len(body.splitlines()) <= 160
     for name in ("faq.md", "troubleshooting.md", "triggers.md", "design-rationale.md"):
         assert (ROOT / "references" / name).exists()
     assert (ROOT / ".github" / "workflows" / "ci.yml").exists()
+    assert "[English](README.md)" in readme and "[中文](README.zh-CN.md)" in readme
+    assert "[English](README.md)" in readme_zh and "[中文](README.zh-CN.md)" in readme_zh
+    assert "npx skills add MikhayEeer/mikhay-accounting-skill" in readme
+    assert "npx skills add MikhayEeer/mikhay-accounting-skill" in readme_zh
+    assert "--overwrite" in readme and "--overwrite" in readme_zh
+    faq = (ROOT / "references" / "faq.md").read_text(encoding="utf-8")
+    assert faq.split("## 1.", 1)[0].find("--overwrite") != -1
+    assert not (ROOT / "scripts" / "package_skill.py").exists()
+    assert (ROOT / "tools" / "package_skill.py").is_file()
+    ignore = (ROOT / ".clawhubignore").read_text(encoding="utf-8")
+    assert "tools/" in ignore
 
 
 def test_package_omits_version_file_tests_and_github(tmp_path: Path) -> None:
-    result = run("package_skill.py", "--output", str(tmp_path))
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "package_skill.py"), "--output", str(tmp_path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     archive = zipfile.ZipFile(tmp_path / "mikhay-accounting-skill.zip")
     names = [name.replace("\\", "/") for name in archive.namelist()]
     assert not any(name.endswith("/VERSION") or name.rsplit("/", 1)[-1] == "VERSION" for name in names)
     assert not any("/tests/" in f"/{name}" or "/.github/" in f"/{name}" for name in names)
+    assert not any(name.endswith("package_skill.py") or "/tools/" in f"/{name}" for name in names)
     assert any(name.endswith("references/faq.md") for name in names)
     assert any(name.endswith("/LICENSE") for name in names)
     assert any(name.endswith("examples/workflow-credit-repay.md") for name in names)
+    assert any(name.endswith("README.zh-CN.md") for name in names)
     manifest = json.loads(archive.read("mikhay-accounting-skill/MANIFEST.json"))
-    assert manifest["version"] == "0.2.1"
+    assert manifest["version"] == "0.2.2"
+
+
+BILL_CSV = (
+    "时间,收支类型,金额,类别,子类,账户,备注\n"
+    "2026-06-01 08:30,支出,15,食品餐饮,早餐,微信钱包,虚构示例早餐\n"
+    "2026-07-02 12:00,支出,20,食品餐饮,午餐,微信钱包,虚构示例午餐\n"
+)
+
+
+def test_import_refuses_existing_shards_without_partial_writes(tmp_path: Path) -> None:
+    src = tmp_path / "bill.csv"
+    src.write_text(BILL_CSV, encoding="utf-8")
+    out = tmp_path / "ledger"
+    existing = out / "2026" / "2026-06.json"
+    existing.parent.mkdir(parents=True)
+    existing.write_text('{"marker":"keep"}\n', encoding="utf-8")
+
+    blocked = run(
+        "import_ledger.py",
+        str(src),
+        "--shard",
+        "month",
+        "--year-dirs",
+        "--output",
+        str(out),
+    )
+    assert blocked.returncode != 0
+    assert "--overwrite" in blocked.stderr
+    assert "No files were written" in blocked.stderr
+    assert "2026-06.json" in blocked.stderr
+    assert existing.read_text(encoding="utf-8") == '{"marker":"keep"}\n'
+    assert not (out / "2026" / "2026-07.json").exists()
+
+    fresh = tmp_path / "fresh"
+    created = run(
+        "import_ledger.py",
+        str(src),
+        "--shard",
+        "month",
+        "--year-dirs",
+        "--output",
+        str(fresh),
+    )
+    assert created.returncode == 0, created.stdout + created.stderr
+    june = json.loads((fresh / "2026" / "2026-06.json").read_text(encoding="utf-8"))
+    july = json.loads((fresh / "2026" / "2026-07.json").read_text(encoding="utf-8"))
+    assert june["records"][0]["金额"] == -15
+    assert july["records"][0]["金额"] == -20
+
+    replaced = run(
+        "import_ledger.py",
+        str(src),
+        "--shard",
+        "month",
+        "--year-dirs",
+        "--output",
+        str(out),
+        "--overwrite",
+    )
+    assert replaced.returncode == 0, replaced.stdout + replaced.stderr
+    written = json.loads(existing.read_text(encoding="utf-8"))
+    assert written["records"][0]["备注"] == "虚构示例早餐"
+    assert (out / "2026" / "2026-07.json").exists()
+
+
+def test_write_json_refuses_existing_file_unless_overwrite(tmp_path: Path) -> None:
+    import import_ledger
+
+    path = tmp_path / "2026-06.json"
+    path.write_text("old\n", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        import_ledger.write_json(path, [], "2026-06", overwrite=False)
+    assert path.read_text(encoding="utf-8") == "old\n"
+    import_ledger.write_json(path, [], "2026-06", overwrite=True)
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    assert loaded["schema_version"] == "0.2.0"
+    assert loaded["records"] == []
+
+
+def test_import_single_file_refuses_existing_output(tmp_path: Path) -> None:
+    src = tmp_path / "one.csv"
+    src.write_text(
+        "时间,收支类型,金额,类别,子类,账户,备注\n"
+        "2026-06-01 08:30,支出,15,食品餐饮,早餐,微信钱包,虚构示例早餐\n",
+        encoding="utf-8",
+    )
+    target = tmp_path / "imported.json"
+    target.write_text('{"marker":"keep"}\n', encoding="utf-8")
+    blocked = run("import_ledger.py", str(src), "--output", str(target))
+    assert blocked.returncode != 0
+    assert target.read_text(encoding="utf-8") == '{"marker":"keep"}\n'
+    allowed = run("import_ledger.py", str(src), "--output", str(target), "--overwrite")
+    assert allowed.returncode == 0, allowed.stdout + allowed.stderr
+    assert json.loads(target.read_text(encoding="utf-8"))["records"]
 
 
 def test_wishlist_still_runs() -> None:

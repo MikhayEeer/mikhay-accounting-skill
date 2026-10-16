@@ -25,7 +25,7 @@ Use `scripts/import_ledger.py` to convert third-party CSV/XLSX bills into the st
 - Use signed amount rules from `schema.md`: `支出` is negative; `收入`, `还款`, `退款` are positive. Legacy single-sided `转账` is positive. `pairid` legs are opposite signs.
 - A source value of `退款` becomes `收支类型=退款`, not income.
 - Keep `currency`, `original_amount`, `fx_rate`, `cny_amount`, `pairid`, `refund_of`, and `target_account` when the source has them. Default currency is `CNY`.
-- Do not overwrite existing ledger files unless the user asks.
+- Do not overwrite existing ledger files. If any target path already exists, `import_ledger.py` aborts the whole batch and writes nothing unless `--overwrite` is set. Back up `data/` first. `--overwrite` replaces each target file and drops records that are not in the new bill. The script enforces this with a `Path.exists()` check before writing.
 
 ## Commands
 

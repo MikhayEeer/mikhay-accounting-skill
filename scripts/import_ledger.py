@@ -359,10 +359,44 @@ def month_of(record: dict[str, Any]) -> str:
     return str(record["时间"])[:7]
 
 
-def write_json(path: Path, records: list[dict[str, Any]], month: str | None = None) -> None:
+def write_json(
+    path: Path,
+    records: list[dict[str, Any]],
+    month: str | None = None,
+    *,
+    overwrite: bool = False,
+) -> None:
+    """Write one ledger shard. Existing files are refused unless overwrite is set."""
+    if path.exists() and not overwrite:
+        raise SystemExit(
+            f"Refusing to overwrite existing ledger file: {path}. "
+            "No further files will be written. Back up the ledger and pass --overwrite to replace it."
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"schema_version": SCHEMA_VERSION, "month": month or "mixed", "records": records}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def existing_ledger_paths(paths: list[Path]) -> list[Path]:
+    return [path for path in paths if path.exists()]
+
+
+def refuse_existing_targets(paths: list[Path], overwrite: bool) -> None:
+    """Abort the whole batch before any write when a target already exists."""
+    if overwrite:
+        return
+    existing = existing_ledger_paths(paths)
+    if not existing:
+        return
+    print(
+        "Refusing to overwrite existing ledger files. No files were written.\n"
+        "Re-import replaces each target file and drops records that are not in the new bill.\n"
+        "Back up the ledger, then re-run with --overwrite only to replace these files:",
+        file=sys.stderr,
+    )
+    for path in existing:
+        print(f"- {path}", file=sys.stderr)
+    raise SystemExit(1)
 
 
 def output_path_for(args: argparse.Namespace, records: list[dict[str, Any]]) -> Path:
@@ -407,6 +441,15 @@ def main() -> int:
     parser.add_argument("--split-by-month", action="store_true", help="Write one JSON file per month.")
     parser.add_argument("--shard", choices=["day", "month"], help="Write one JSON file per day or month. Keys use the file basename.")
     parser.add_argument("--year-dirs", action="store_true", help="Nest shard files under YYYY/ (and YYYY-MM/ for days).")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help=(
+            "Replace existing ledger files. Without this flag, any existing target aborts the "
+            "whole batch and nothing is written. Back up the ledger first; records missing from "
+            "the new bill are dropped."
+        ),
+    )
     args = parser.parse_args()
 
     if args.split_by_month and args.shard == "day":
@@ -427,6 +470,7 @@ def main() -> int:
         for error in errors[:50]:
             print(f"- {error}", file=sys.stderr)
         return 1
+    planned: list[tuple[Path, list[dict[str, Any]], str | None, str | None]] = []
     if args.shard:
         out_dir = Path(args.output or "data")
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -434,15 +478,23 @@ def main() -> int:
             grouped[record_shard_key(record, args.shard)].append(record)
         for key, shard_records in sorted(grouped.items()):
             out = shard_output_path(out_dir, key, args.year_dirs, args.shard)
-            write_json(out, shard_records, key if args.shard == "month" else key[:7])
-            written_key = shard_key(out, args.shard)
-            if written_key != key:
-                raise SystemExit(f"shard key mismatch for {out}: basename key {written_key!r} != {key!r}")
-            print(f"wrote {out} records={len(shard_records)} shard={written_key} warnings={len(warnings)}")
-        return 0
-    out = output_path_for(args, records)
-    write_json(out, records, args.month or (month_of(records[0]) if records else None))
-    print(f"wrote {out} records={len(records)} warnings={len(warnings)}")
+            month = key if args.shard == "month" else key[:7]
+            planned.append((out, shard_records, month, key))
+    else:
+        out = output_path_for(args, records)
+        month = args.month or (month_of(records[0]) if records else None)
+        planned.append((out, records, month, None))
+
+    refuse_existing_targets([path for path, _records, _month, _key in planned], args.overwrite)
+    for out, shard_records, month, key in planned:
+        write_json(out, shard_records, month, overwrite=args.overwrite)
+        if key is None:
+            print(f"wrote {out} records={len(shard_records)} warnings={len(warnings)}")
+            continue
+        written_key = shard_key(out, args.shard)
+        if written_key != key:
+            raise SystemExit(f"shard key mismatch for {out}: basename key {written_key!r} != {key!r}")
+        print(f"wrote {out} records={len(shard_records)} shard={written_key} warnings={len(warnings)}")
     return 0
 
 

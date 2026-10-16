@@ -1,52 +1,70 @@
+[English](README.md) · [中文](README.zh-CN.md)
+
 # Mikhay Accounting Skill
 
-技能版本 `0.2.1`（见 `SKILL.md` frontmatter）。账本 `schema_version` 仍是 `0.2.0`。
+Skill version `0.2.2` (see `SKILL.md` frontmatter). Ledger `schema_version` stays `0.2.0`.
 
-安装：`npx skills add MikhayEeer/mikhay-accounting-skill`
+Install: `npx skills add MikhayEeer/mikhay-accounting-skill`
 
-协议：MIT，版权人 MikhayEeer。全文见 [LICENSE](LICENSE)。
+Homepage: https://github.com/MikhayEeer/mikhay-accounting-skill
 
-Chinese personal accounting workflow for CSV/JSON ledger files. 常见错误见 `references/faq.md`，报错恢复见 `references/troubleshooting.md`。
+License: MIT, copyright MikhayEeer. Full text in [LICENSE](LICENSE).
 
-## 导入导出
+Chinese personal ledger workflow for CSV, JSON, and XLSX files. Agent instructions stay in Chinese in `SKILL.md`. Common mistakes: `references/faq.md`. Recovery: `references/troubleshooting.md`.
 
-导入 CSV/XLSX 到标准 JSON：
+Display name: `Mikhay 记账 - 资产管理/信用卡/预购清单/年月统计`.
+
+## Privacy
+
+This skill is for Chinese personal ledgers. Records, asset snapshots, and wishlists stay in local files under `data/`, `raw/`, and `exports/`. The scripts do not upload the ledger.
+
+## Import and export
+
+**Re-import can delete data.** `scripts/import_ledger.py` refuses to overwrite an existing ledger file unless you pass `--overwrite`. If any target path already exists, the whole batch aborts and nothing is written. The script checks `Path.exists()` before it writes. `--overwrite` replaces each target file; records that are not in the new bill are dropped from that file. Back up `data/` before you use the flag. The gate is enforced by the script, not only by asking first.
+
+Import CSV or XLSX into standard JSON:
 
 ```bash
 python scripts/import_ledger.py raw/bill.csv --output data/imported.json
 ```
 
-按月拆分导入：
+Split by month:
 
 ```bash
 python scripts/import_ledger.py raw/bill.csv --split-by-month --year-dirs --output data/ledger
 ```
 
-导出标准 JSON 到 CSV：
+Replace existing shards only after a backup:
+
+```bash
+python scripts/import_ledger.py raw/bill.csv --shard month --year-dirs --output data/ledger --overwrite
+```
+
+Export standard JSON to CSV:
 
 ```bash
 python scripts/export_ledger.py data/ledger/2026/2026-06.json --output exports/2026/2026-06.csv
 ```
 
-推荐真实账本按年月分片：`data/ledger/YYYY/YYYY-MM.json`。按日分片：`data/ledger/YYYY/YYYY-MM/YYYY-MM-DD.json`。
+Preferred real ledger shards: `data/ledger/YYYY/YYYY-MM.json`. Day shards: `data/ledger/YYYY/YYYY-MM/YYYY-MM-DD.json`.
 
 ```bash
 python scripts/import_ledger.py raw/bill.csv --shard day --year-dirs --output data/ledger
 python scripts/import_ledger.py raw/bill.csv --shard month --year-dirs --output data/ledger
 ```
 
-分片键只用文件名（`os.path.basename`）。`data/ledger/2026/2026-06.json` 的月份键是 `2026-06`。不要截取整段路径，否则会得到错误键 `r/202`。
+Shard keys use the file name (`os.path.basename`). The month key of `data/ledger/2026/2026-06.json` is `2026-06`. Do not slice the full path; that produces the wrong key `r/202`.
 
-校验：
+Validate:
 
 ```bash
 python scripts/validate_ledger.py data/ledger/2026/2026-06.json
 python scripts/validate_ledger.py data/ledger
 ```
 
-## 花销与内部转账
+## Spending and internal transfers
 
-统计一律跑脚本，不要手算。脚本会扫描传入的全部分片。
+Totals come from scripts. Do not add them by hand. The scripts scan every shard you pass in.
 
 ```bash
 python scripts/summarize_ledger.py data/ledger
@@ -54,16 +72,16 @@ python scripts/summarize_ledger.py data/ledger --buckets examples/buckets.sample
 python scripts/summarize_tags.py data/ledger
 ```
 
-两套口径：
+Two bases:
 
-- **花销**：支出毛额减去退款。退款（`收支类型=退款` 或 `refund_of`）不是收入，也不算一笔新的消费。报表同时给出毛额和净额。
-- **内部转账**：账户之间的 `转账`。`pairid` 成对的两条腿只计一次。转账不进入花销。
+- **花销 (spending):** gross expense minus refunds. A refund (`收支类型=退款` or `refund_of`) is not income and is not a new purchase. Reports show both gross and net.
+- **内部转账 (internal transfers):** `转账` between accounts. A `pairid` pair is counted once. Transfers are not spending.
 
-标签使用 `trip:`、`event:`、`person:`、`nature:`。`summarize_tags.py` 对每个标签给出毛额、净额、按日合计，以及类别行上的占比。
+Tags use `trip:`, `event:`, `person:`, and `nature:`. `summarize_tags.py` prints gross, net, per-day totals, and the category share on the same line.
 
-可选字段还包括 `currency`（默认 CNY）、`original_amount`、`fx_rate`、`cny_amount`。合计使用人民币 `金额`。新写出的 JSON 带 `schema_version`。旧账本没有这些字段也能用。
+Optional fields: `currency` (default CNY), `original_amount`, `fx_rate`, `cny_amount`. Totals use the CNY `金额`. New JSON files include `schema_version`. Older books that omit these fields still load.
 
-## 净资产、信用卡与发薪日
+## Net worth, credit cards, and payday
 
 ```bash
 python scripts/summarize_assets.py data/assets/2026/2026-06.assets.json --cc-method A
@@ -71,71 +89,71 @@ python scripts/summarize_assets.py data/assets/2026/2026-06.assets.json --foreca
 python scripts/project_assets.py data/assets/assets.json data/ledger/2026/2026-06.json
 ```
 
-账户有 `included` 和 `excluded`（备查）两种。净资产分成「计入净资产」和「备查账户」两段。备查示例：Apple Card、公积金、助学贷款、加密货币。
+Accounts are `included` or `excluded` (备查). Net worth is printed as 计入净资产 and 备查账户. Built-in 备查 examples: Apple Card, 公积金, 助学贷款, 加密货币.
 
-信用卡余额默认用方法 A：最近快照 + 快照之后的流水。方法 B 从零重放该卡流水、不用快照。输出会写明用的是哪一种。
+Credit-card balances default to method A: latest snapshot plus records after that snapshot. Method B replays the card ledger from zero and ignores the snapshot. The report names the method.
 
-`--forecast` 给出每张卡的预计账单和预计还款，并对照发薪日现金流。发薪日是当月最后一个工作日（周一至周五）。
+`--forecast` prints each card's projected statement and repayment against payday cash flow. Payday is the last Monday–Friday of the month.
 
-## 资产模块
+## Assets
 
-查询总资产、总负债、净资产、分期和还款提醒：
+Query total assets, liabilities, net worth, installments, and repayment reminders:
 
 ```bash
 python scripts/summarize_assets.py data/assets/2026/2026-06.assets.json
 ```
 
-记账会影响资产统计；直接改资产快照时，默认先询问是否创建差额记账项。
+New ledger records affect asset totals. Editing an asset snapshot directly should report the difference and ask before writing an adjustment. `project_assets.py --write` writes the inferred view only when you pass that flag.
 
-## 预购清单
+## Wishlist
 
-分析想买物品的经济压力、购买建议和优先级：
+Pressure, suggestions, and priority for planned purchases:
 
 ```bash
 python scripts/analyze_wishlist.py data/wishlist/2026/wishlist.json --ledger data/ledger/2026/2026-06.json --assets data/assets/2026/2026-06.assets.json
 ```
 
-预购清单不是账本记录，真正购买后再生成 `支出` item。
+A wishlist item is not a ledger record. Write an `支出` only after the purchase happens.
 
-## 一键封装
+## Maintainer packaging
 
-生成给其他 Agent 使用的离线包：
+`tools/package_skill.py` is maintainer-only. It is not an end-user ledger command. ClawHub publish ignores `tools/` via `.clawhubignore`, and the archive itself omits `tools/` and `package_skill.py`.
 
 ```bash
-python scripts/package_skill.py
+python tools/package_skill.py
 ```
 
-输出位置：
+Output:
 
 ```text
 dist/mikhay-accounting-skill.tar.gz
 dist/mikhay-accounting-skill.zip
 ```
 
-包内包含 skill、参考文档、导入规则、脚本、虚构示例和 `LICENSE`，不包含 `VERSION`、`tests/`、`.github/`、`data/`、`raw/`、`exports/`、`.claude/`、`.codex/`。技能版本写在包内 `MANIFEST.json`，与 `SKILL.md` 的 `version` 相同。
+The archive includes the skill, reference docs, import rules, `scripts/`, fictional examples, both READMEs, and `LICENSE`. It does not include `VERSION`, `tests/`, `.github/`, `tools/`, `data/`, `raw/`, `exports/`, `.claude/`, or `.codex/`. `MANIFEST.json` uses the same version as `SKILL.md`.
 
-## 记账场景：使用 skill 与不使用 skill 的对比
+## Using the skill compared with not using it
 
-以一份没有放进本仓库的本地样本，做一次本地(ClaudeCode GLM-5.2)校验、月度统计、分类 Top 为例。下面的耗时和 token 是当时的量级，不是仓库里的示例文件。
+This comparison used a local sample that is not in the repository: one local check, a monthly total, and a category top list (Claude Code, GLM-5.2). The times and token counts below are that session's order of magnitude, not the example files in this repo.
 
-| 维度 | 不使用 skill（纯 LLM 推理） | 使用 skill（脚本 + 短指令） |
+| | Without the skill (LLM only) | With the skill (scripts + short instructions) |
 |---|---|---|
-| 输入 token | 需将 schema、类别表、规则口头说明给模型，或模型靠记忆推理，约 2-4k token 规则加上全量记录约 15k token | 先读 SKILL.md，再按需打开 schema、categories 或 references |
-| 推理 token | 样本逐条分类、求和、别名归一化，输出长且易错，约 8-15k 输出 token | 几乎不推理，只发 2 条 Bash 命令 |
-| 输出 token | 完整报表手写，约 1-2k | 脚本结果，约 300-500 token |
-| 延迟 | 单轮 30s 到 1min 以上，多轮纠错更久 | 2 次 Bash 调用，约 3-8s |
-| 准确性 | 求和与别名归一化经常出错，上百笔难一次算对 | 确定性正确，与对账文件完全一致 |
-| 总 token | 约 25-35k | 约 3-5k |
+| Input tokens | Schema, categories, and rules pasted or recalled, about 2–4k tokens of rules plus about 15k of records | Read `SKILL.md`, then open schema, categories, or references only when needed |
+| Reasoning tokens | Classify, sum, and alias each row; long output, easy to get wrong, about 8–15k output tokens | Almost no arithmetic; two Bash commands |
+| Output tokens | Hand-written report, about 1–2k | Script result, about 300–500 tokens |
+| Latency | One turn of 30s to over 1min, longer with correction rounds | Two Bash calls, about 3–8s |
+| Accuracy | Sums and alias normalization often drift; a few hundred rows rarely match on the first try | Deterministic; matches the reconciliation file |
+| Total tokens | About 25–35k | About 3–5k |
 
-## 结论
+## Conclusion
 
-- Token：使用 skill 大约节省 5-8 倍，主要省在不必把规则塞进上下文、不必由模型逐条算账。
-- 速度：使用 skill 快约 5-10 倍，从可能需要纠错 2-3 轮变为一次跑通。
-- 质量：差距最大。纯 LLM 做金额求和与别名归一化，容易出现几百元误差；脚本是确定性的，零误差。
+- Tokens: the skill used about 5–8× fewer, mostly because the rules and the row-by-row arithmetic stay out of the prompt.
+- Speed: about 5–10× faster, from two or three correction rounds down to one pass.
+- Quality: the largest gap. Hand sums and alias normalization can miss by hundreds of yuan. The scripts are deterministic.
 
-如需长期记账（录入新交易、按月出报表、查异常），建议把本 skill 放到对应工具支持的 skill/配置目录下，按「读 schema、跑 validate、跑 summarize、只回报脚本给出的总数与异常」执行。标签、分类占比和净资产都由脚本扫描全部分片后给出，不要手算。
+For ongoing bookkeeping (new records, monthly reports, exceptions), install the skill and follow: read the schema, run validate, run summarize, and report only the totals and warnings the scripts print. Tag totals, category shares, and net worth come from a full shard scan. Do not add them by hand.
 
-测试：
+Tests:
 
 ```bash
 python -m pytest -q

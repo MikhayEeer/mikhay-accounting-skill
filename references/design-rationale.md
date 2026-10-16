@@ -38,4 +38,4 @@
 
 ## 两个版本号
 
-`SKILL.md` frontmatter 的 `version: 0.2.1` 是技能包版本。账本里的 `schema_version: 0.2.0` 是数据格式，由脚本写入。旧账本可以没有 `schema_version`。这两个号不需要写成同一个数。技能版本只放在 frontmatter，仓库里不再另放 `VERSION` 文件。
+`SKILL.md` frontmatter 的 `version: 0.2.2` 是技能包版本。账本里的 `schema_version: 0.2.0` 是数据格式，由脚本写入。旧账本可以没有 `schema_version`。这两个号不需要写成同一个数。技能版本只放在 frontmatter，仓库里不再另放 `VERSION` 文件。
