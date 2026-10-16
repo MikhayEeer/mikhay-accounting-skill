@@ -41,7 +41,7 @@
 
 - 用户：这是支付宝导出的账单，帮我导入。
 - 模块：导入。
-- 动作：先读 `import_rules.md`。运行 `scripts/import_ledger.py <file> --shard month --year-dirs --output data/ledger`。目标月份文件已存在就先问。然后 `validate_ledger.py`。
+- 动作：先读 `import_rules.md`。运行 `scripts/import_ledger.py <file> --shard month --year-dirs --output data/ledger`。目标已存在时脚本整批失败、不写文件。先备份 `data/`，用户明确要替换再加 `--overwrite`。然后 `validate_ledger.py`。
 - 输出：写入路径、条数、警告（例如 `待确认分类`）。校验通过后再问要不要出月报。
 
 ## 7. 更新资产快照

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.2 - 2026-10-16
+
+Import no longer replaces an existing ledger shard unless `--overwrite` is set. Ledger `schema_version` stays `0.2.0`.
+
+### Fixed
+
+- `scripts/import_ledger.py` checks `Path.exists()` before writing. If any target path already exists and `--overwrite` is absent, the whole batch aborts and nothing is written. `write_json` uses the same rule.
+
+### Changed
+
+- Skill version is `0.2.2`. `displayName` is `Mikhay 记账 - 资产管理/信用卡/预购清单/年月统计`.
+- `metadata.openclaw.homepage` is `https://github.com/MikhayEeer/mikhay-accounting-skill`.
+- `SKILL.md` and `references/faq.md` warn that re-import can drop records, tell you to back up `data/`, and state that the script enforces `--overwrite`.
+- `package_skill.py` moved to `tools/`. It is maintainer-only, listed in `.clawhubignore`, and omitted from the handoff archive.
+- `README.md` is English. `README.zh-CN.md` is the Chinese copy of the same sections. `SKILL.md` stays Chinese.
+
+### Added
+
+- Privacy note: local Chinese personal ledger only; scripts do not upload it. License in the repo stays MIT.
+
 ## 0.2.1 - 2026-10-16
 
 Documentation only. Ledger scripts and `schema_version` stay at `0.2.0`.

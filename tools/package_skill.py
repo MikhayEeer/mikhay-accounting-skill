@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Create portable handoff archives for this skill."""
+"""Maintainer-only handoff archives for this skill.
+
+Not part of the end-user skill. This file lives in tools/ and is excluded from
+ClawHub publish (see .clawhubignore) and from the archives it builds.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ INCLUDE_DIRS = {"agents", "examples", "references", "scripts"}
 INCLUDE_FILES = {
     ".gitignore",
     "README.md",
+    "README.zh-CN.md",
     "CHANGELOG.md",
     "HANDOFF.md",
     "LICENSE",
@@ -42,12 +47,15 @@ EXCLUDE_PARTS = {
     "reports",
     "dist",
     "tests",
+    "tools",
 }
 
 
 def should_include(path: Path) -> bool:
     parts = set(path.parts)
     if parts & EXCLUDE_PARTS:
+        return False
+    if path.name == "package_skill.py":
         return False
     if path.name.endswith(".pyc"):
         return False
@@ -119,7 +127,9 @@ def make_zip(root: Path, files: list[Path], manifest: Path, output: Path) -> Pat
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Package this skill for agent handoff.")
+    parser = argparse.ArgumentParser(
+        description="Maintainer-only: package this skill for agent handoff. Not part of the published skill."
+    )
     parser.add_argument("--output", default="dist", help="Output directory. Default: dist")
     args = parser.parse_args()
 

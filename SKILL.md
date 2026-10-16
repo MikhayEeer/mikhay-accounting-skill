@@ -1,23 +1,34 @@
 ---
 slug: mikhay-accounting-skill
-displayName: "Mikhay 记账"
-version: 0.2.1
+displayName: "Mikhay 记账 - 资产管理/信用卡/预购清单/年月统计"
+version: 0.2.2
 summary: "中文个人记账。流水、资产快照、信用卡和愿望清单分开存放；合计只抄脚本；退款不是收入。"
 license: MIT
 name: mikhay-accounting-skill
-description: Chinese personal accounting workflow for CSV/JSON/XLSX ledger, asset, and wishlist files. Use when the user asks to import, export, record, classify, validate, summarize, store, analyze records, or evaluate planned purchases with fields like 时间, 收支类型, 金额, 类别, 子类, 账户, 备注, tags, note; supports 支出, 收入, 还款, 转账, 退款, trip/event/person/nature tags, day or month shards, refunds, transfer pairs, multi-currency CNY totals, included and excluded accounts, credit-card snapshot methods, payday forecast, third-party bill conversion, and monthly reports.
+description: Chinese personal accounting workflow for CSV/JSON/XLSX ledger, asset, and wishlist files. Use when the user asks to import, export, record, classify, validate, summarize, store, analyze records, or evaluate planned purchases with fields like 时间, 收支类型, 金额, 类别, 子类, 账户, 备注, tags, note; supports 支出, 收入, 还款, 转账, 退款, trip/event/person/nature tags, day or month shards, refunds, transfer pairs, multi-currency CNY totals, included and excluded accounts, credit-card snapshot methods, payday forecast, third-party bill conversion, and monthly reports. Local ledger only; files are not uploaded.
+metadata:
+  openclaw:
+    homepage: https://github.com/MikhayEeer/mikhay-accounting-skill
 ---
 
 # Mikhay 记账
 
-技能版本 `0.2.1`。账本字段 `schema_version` 仍是 `0.2.0`，那是数据格式号。合计必须来自脚本，never hand math。没跑脚本就不要报数字。
+技能版本 `0.2.2`。账本字段 `schema_version` 仍是 `0.2.0`，那是数据格式号。合计必须来自脚本，never hand math。没跑脚本就不要报数字。
+
+## 重新导入会覆盖整份分片
+
+`import_ledger.py` 默认拒绝覆盖。任一目标路径已存在且没有 `--overwrite` 时，整批中止，不写任何文件。`--overwrite` 会整文件替换该分片，新账单里没有的旧流水会丢失。先备份 `data/`。这道门由脚本执行（写入前检查路径是否存在），不是只靠先问用户。
+
+## 隐私
+
+面向中文个人账本。流水、资产快照和愿望清单只留在本地 `data/`、`raw/`、`exports/`。脚本不会上传这些文件。
 
 ## 不做什么
 
 - 不把退款记成收入，不把转账或还款记成花销。
 - 购买前不把愿望清单写成 `支出`，也不替用户估价格。
 - 不主动做预算、投资或消费建议。
-- 不静默改分类、不覆盖已有分片、不在用户没要求时写差额调整。
+- 不静默改分类。没有 `--overwrite` 时不覆盖已有分片。用户没要求时不写差额调整。
 - 不手算合计，不跳过范围内的分片。
 
 取舍见 `references/design-rationale.md`。
@@ -38,7 +49,7 @@ description: Chinese personal accounting workflow for CSV/JSON/XLSX ledger, asse
 3. 「支付宝还花呗 500」→ 记账 → `还款` `+500`，`note` 写 `target_account=花呗`。
 4. 「建行转支付宝 200」→ 记账 → 两条 `转账`，同一 `pairid`，金额一负一正。
 5. 「这个月花了多少」→ 汇总 → 只跑该月分片，报花销毛额、退款、净额。
-6. 「导入这份支付宝账单」→ 导入 → `import_ledger.py` 后校验；已有分片先问再覆盖。
+6. 「导入这份支付宝账单」→ 导入 → `import_ledger.py` 后校验。已有分片时脚本直接拒绝；备份并确认替换后才加 `--overwrite`。
 7. 「建行余额现在是 8000」→ 资产 → 追加快照；和推算不一致就先报差额。
 8. 「想买机械键盘，399」→ 愿望清单 → 只写 wishlist，不写账本。
 9. 「发薪日前花呗要还多少」→ 预测 → `summarize_assets.py --forecast`，写明算法和发薪日。
@@ -62,8 +73,8 @@ description: Chinese personal accounting workflow for CSV/JSON/XLSX ledger, asse
 - 格式错误：指出哪个值和 `schema.md` 不符，并给出改后的样子。
 - 校验失败：贴出 `INVALID` 的第一条原因，改完再跑 `validate_ledger.py`。
 - 找不到文件：说明路径不存在。按 `storage.md` 建空目录，不要编余额。
-- 文件损坏：引用 JSON 解析错误。保留坏文件，不覆盖；从 `raw/` 重导或请用户确认后再替换。
-- 重试：校验和汇总可以重跑。导入和 `--write` 会写文件，输入没改或用户没同意覆盖时不要重跑。同一条 `INVALID` 重复出现就停。
+- 文件损坏：引用 JSON 解析错误。保留坏文件。从 `raw/` 重导到新路径，或在备份后用 `--overwrite` 替换。没有该标志时脚本不会覆盖。
+- 重试：校验和汇总可以重跑。导入在目标已存在时失败退出，除非加上 `--overwrite`。没备份、用户没明确要替换时不要加这个标志。同一条 `INVALID` 重复出现就停。
 
 ## 按需阅读
 
@@ -81,7 +92,7 @@ description: Chinese personal accounting workflow for CSV/JSON/XLSX ledger, asse
 - `scripts/summarize_assets.py`：计入净资产、备查、`--cc-method`、`--forecast`。
 - `scripts/project_assets.py`：最近快照加上之后的流水，得到推算余额。
 - `scripts/validate_ledger.py`：相信文件之前先跑。
-- `scripts/import_ledger.py <file> --shard month --year-dirs --output data/ledger`：转到标准 JSON。目标分片已存在时先问用户。
+- `scripts/import_ledger.py <file> --shard month --year-dirs --output data/ledger`：转到标准 JSON。目标已存在则整批失败；备份后加 `--overwrite` 才会替换。
 - `scripts/export_ledger.py`：导出 CSV。`scripts/analyze_wishlist.py`：购买压力。
 
 ## 数据规则
