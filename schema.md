@@ -150,9 +150,9 @@ For reminders, use a separate JSON file if needed:
 
 Prefer namespaced tags. A record may carry more than one tag; each tag receives the full amount.
 
-- `trip:` a trip, such as `trip:shanghai`
-- `event:` an event, such as `event:wedding`
-- `person:` a person, such as `person:li`
+- `trip:` a trip, such as `trip:demo`
+- `event:` an event, such as `event:demo`
+- `person:` a person, such as `person:demo`
 - `nature:` why the money moved, such as `nature:need`
 
 Older bare tags such as `旅行` still load, with a warning. Any other `prefix:` is invalid.

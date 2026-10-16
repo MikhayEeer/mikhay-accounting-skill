@@ -19,6 +19,7 @@ INCLUDE_FILES = {
     "README.md",
     "CHANGELOG.md",
     "HANDOFF.md",
+    "LICENSE",
     "SKILL.md",
     "schema.md",
     "categories.md",

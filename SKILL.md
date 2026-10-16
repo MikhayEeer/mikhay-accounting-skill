@@ -3,6 +3,7 @@ slug: mikhay-accounting-skill
 displayName: "Mikhay 记账"
 version: 0.2.1
 summary: "中文个人记账。流水、资产快照、信用卡和愿望清单分开存放；合计只抄脚本；退款不是收入。"
+license: MIT
 name: mikhay-accounting-skill
 description: Chinese personal accounting workflow for CSV/JSON/XLSX ledger, asset, and wishlist files. Use when the user asks to import, export, record, classify, validate, summarize, store, analyze records, or evaluate planned purchases with fields like 时间, 收支类型, 金额, 类别, 子类, 账户, 备注, tags, note; supports 支出, 收入, 还款, 转账, 退款, trip/event/person/nature tags, day or month shards, refunds, transfer pairs, multi-currency CNY totals, included and excluded accounts, credit-card snapshot methods, payday forecast, third-party bill conversion, and monthly reports.
 ---

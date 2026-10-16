@@ -389,12 +389,12 @@ def test_pair_tag_on_either_leg_counts_once() -> None:
                 账户="支付宝",
                 备注="转入",
                 pairid="pair",
-                tags="person:li",
+                tags="person:demo",
             ),
         ]
     )
     assert stats["event:move"].transfer == Decimal("15")
-    assert stats["person:li"].transfer == Decimal("15")
+    assert stats["person:demo"].transfer == Decimal("15")
     assert stats["event:move"].gross == Decimal("0")
 
 
@@ -429,6 +429,7 @@ def test_package_omits_version_file_tests_and_github(tmp_path: Path) -> None:
     assert not any(name.endswith("/VERSION") or name.rsplit("/", 1)[-1] == "VERSION" for name in names)
     assert not any("/tests/" in f"/{name}" or "/.github/" in f"/{name}" for name in names)
     assert any(name.endswith("references/faq.md") for name in names)
+    assert any(name.endswith("/LICENSE") for name in names)
     assert any(name.endswith("examples/workflow-credit-repay.md") for name in names)
     manifest = json.loads(archive.read("mikhay-accounting-skill/MANIFEST.json"))
     assert manifest["version"] == "0.2.1"
