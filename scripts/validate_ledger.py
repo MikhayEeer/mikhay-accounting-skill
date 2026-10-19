@@ -11,15 +11,20 @@ from pathlib import Path
 from typing import Any
 
 from ledgerlib import (
+    ACCEPTED_SCHEMA_VERSIONS,
     ACCOUNT_KINDS,
     CATEGORY_ALIASES,
     CATEGORY_MAP,
+    CREDIT_MODES,
     CURRENCY_RE,
+    INVEST_OUT_SUBCATEGORY,
     LEGACY_PAIR_ALIASES,
+    REIMBURSE_STATUSES,
     SCHEMA_VERSION,
     SUBCATEGORY_ALIASES,
     TYPES,
     check_tag,
+    credit_mode,
     currency_of,
     decimal_value,
     default_max_date,
@@ -34,6 +39,7 @@ from ledgerlib import (
     parse_tags,
     parse_time,
     record_id,
+    reimburse_ref,
     target_account,
 )
 
@@ -150,6 +156,13 @@ def validate_records(
                 warnings.append(f"{prefix}: {tx_type} usually uses a positive 金额")
             elif tx_type == "退款" and amount < 0:
                 warnings.append(f"{prefix}: 退款 usually uses a positive 金额")
+            elif tx_type == "报销" and amount < 0:
+                warnings.append(f"{prefix}: 报销 usually uses a positive 金额")
+            elif tx_type == "投资" and not pair_id(row):
+                if norm_subcategory == INVEST_OUT_SUBCATEGORY and amount < 0:
+                    warnings.append(f"{prefix}: 赎回 usually uses a positive 金额 on the cash account")
+                elif norm_subcategory != INVEST_OUT_SUBCATEGORY and amount > 0:
+                    warnings.append(f"{prefix}: 投资投入 usually uses a negative 金额 on the cash account")
             elif tx_type == "转账" and amount < 0 and not pair_id(row):
                 warnings.append(f"{prefix}: legacy 转账 usually uses a positive 金额; pair legs may be signed")
         if account not in catalog:
@@ -160,14 +173,25 @@ def validate_records(
             errors.append(f"{prefix}: invalid 子类 {subcategory!r} for 类别 {category!r}")
         else:
             if tx_type == "退款" or (is_refund(row) and tx_type != "支出"):
-                if norm_category in {"收入", "还款", "转账"}:
+                if norm_category in {"收入", "还款", "转账", "报销", "投资"}:
                     errors.append(f"{prefix}: 退款 cannot use 类别 {norm_category}")
             else:
-                expected_category = {"收入": "收入", "还款": "还款", "转账": "转账"}.get(tx_type)
+                expected_category = {
+                    "收入": "收入",
+                    "还款": "还款",
+                    "转账": "转账",
+                    "报销": "报销",
+                    "投资": "投资",
+                }.get(tx_type)
                 if expected_category and norm_category != expected_category:
                     errors.append(f"{prefix}: 收支类型 {tx_type} should use 类别 {expected_category}")
-                if tx_type == "支出" and norm_category in {"收入", "还款", "转账", "退款"}:
+                if tx_type == "支出" and norm_category in {"收入", "还款", "转账", "退款", "报销", "投资"}:
                     errors.append(f"{prefix}: 支出 cannot use 类别 {norm_category}")
+            if tx_type == "收入" and norm_subcategory == "报销":
+                warnings.append(
+                    f"{prefix}: 收入/报销 is a legacy shape and still counts as income; "
+                    "new records should use 收支类型=报销. Rewriting old rows is the user's decision"
+                )
         for tag in parse_tags(row.get("tags")):
             status, message = check_tag(tag)
             if status == "error":
@@ -180,6 +204,22 @@ def validate_records(
             errors.append(f"{prefix}: unknown target_account {noted_target!r}")
         if tx_type == "转账" and not pair_id(row) and not noted_target:
             warnings.append(f"{prefix}: 转账 has neither pairid nor target_account")
+        if tx_type == "投资" and not pair_id(row) and not noted_target:
+            warnings.append(f"{prefix}: 投资 has neither pairid nor target_account")
+        status = str(row.get("报销状态", "") or "").strip()
+        if status and status not in REIMBURSE_STATUSES:
+            errors.append(f"{prefix}: 报销状态 must be 待报销, 已报销, or 不报销")
+        elif status and tx_type != "支出":
+            warnings.append(f"{prefix}: 报销状态 belongs on 支出 records")
+        expected_reimburse = row.get("预计报销", "")
+        if not _blank(expected_reimburse):
+            expected_amount = decimal_value(expected_reimburse)
+            if expected_amount is None or expected_amount < 0:
+                errors.append(f"{prefix}: 预计报销 must be a non-negative decimal")
+            elif tx_type != "支出":
+                warnings.append(f"{prefix}: 预计报销 belongs on 支出 records")
+            elif amount is not None and expected_amount > abs(amount):
+                warnings.append(f"{prefix}: 预计报销 is larger than 金额")
         rid = record_id(row)
         if rid:
             if rid in seen_ids:
@@ -199,6 +239,8 @@ def validate_records(
         if refund_ref:
             if tx_type not in {"退款", "支出"}:
                 errors.append(f"{prefix}: refund_of is only valid on 退款 records")
+        if reimburse_ref(row) and tx_type != "报销":
+            errors.append(f"{prefix}: reimburse_of is only valid on 报销 records")
 
     for pid, legs in pairs.items():
         label = f"pairid {pid}"
@@ -208,8 +250,10 @@ def validate_records(
         (left_i, left), (right_i, right) = legs
         left_amount = decimal_value(left.get("金额"))
         right_amount = decimal_value(right.get("金额"))
-        if str(left.get("收支类型", "")).strip() != "转账" or str(right.get("收支类型", "")).strip() != "转账":
-            errors.append(f"{label}: both legs must be 转账")
+        left_type = str(left.get("收支类型", "")).strip()
+        right_type = str(right.get("收支类型", "")).strip()
+        if {left_type, right_type} not in ({"转账"}, {"投资"}):
+            errors.append(f"{label}: both legs must be 转账, or both must be 投资")
         if left_amount is None or right_amount is None:
             continue
         if abs(left_amount) != abs(right_amount):
@@ -235,6 +279,23 @@ def validate_records(
                 warnings.append(message + " in this file")
         elif str(target.get("收支类型", "")).strip() != "支出":
             errors.append(f"{prefix}: refund_of target must be 支出")
+
+    for i, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            continue
+        linked = reimburse_ref(row)
+        if not linked:
+            continue
+        target = id_index.get(linked)
+        prefix = f"record[{i}]"
+        if target is None:
+            message = f"{prefix}: reimburse_of {linked!r} does not match a record id"
+            if strict_refs:
+                errors.append(message)
+            else:
+                warnings.append(message + " in this file")
+        elif str(target.get("收支类型", "")).strip() != "支出":
+            errors.append(f"{prefix}: reimburse_of target must be 支出")
     return errors, warnings
 
 
@@ -282,7 +343,12 @@ def validate_day(value: Any) -> bool:
     return 1 <= day <= 31
 
 
-def validate_credit_accounts(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]]) -> tuple[list[str], list[str]]:
+def validate_credit_accounts(
+    rows: list[dict[str, Any]],
+    catalog: dict[str, dict[str, str]],
+    *,
+    default_mode: str = "debt_only",
+) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     for i, row in enumerate(rows, 1):
@@ -308,6 +374,22 @@ def validate_credit_accounts(rows: list[dict[str, Any]], catalog: dict[str, dict
             value = row.get(field, "")
             if not _blank(value) and not validate_day(value):
                 errors.append(f"{prefix}: {field} must be 1-31")
+        row_mode = str(row.get("mode") or "").strip()
+        if row_mode and row_mode not in CREDIT_MODES:
+            errors.append(f"{prefix}: mode must be debt_only or with_limit")
+        mode = credit_mode(row, {"mode": default_mode})
+        if mode == "with_limit" and debt is not None:
+            if _blank(row.get("额度")):
+                warnings.append(f"{prefix}: with_limit mode is missing 额度")
+            else:
+                limit = decimal_value(row.get("额度"))
+                available_raw = row.get("可用额度", "")
+                if limit is not None and not _blank(available_raw):
+                    available = decimal_value(available_raw)
+                    if available is not None and abs((limit - debt) - available) > Decimal("1"):
+                        warnings.append(
+                            f"{prefix}: 可用额度 differs from 额度-欠款 by more than 1"
+                        )
     return errors, warnings
 
 
@@ -383,10 +465,18 @@ def validate_book(
     warnings: list[str] = []
     max_date = max_date or default_max_date()
     version = str(book.get("schema_version", "") or "")
-    if not version:
-        warnings.append("schema_version missing; treated as a legacy ledger")
-    elif version != SCHEMA_VERSION:
+    if version not in ACCEPTED_SCHEMA_VERSIONS:
         warnings.append(f"unrecognized schema_version {version!r}; this tool writes {SCHEMA_VERSION}")
+    policy = book.get("credit_policy") or {}
+    default_mode = "debt_only"
+    if policy and not isinstance(policy, dict):
+        errors.append("credit_policy must be an object")
+    elif isinstance(policy, dict):
+        mode = str(policy.get("mode") or "").strip()
+        if mode and mode not in CREDIT_MODES:
+            errors.append("credit_policy.mode must be debt_only or with_limit")
+        elif mode:
+            default_mode = mode
     catalog, policy_errors = merge_account_policy(book.get("account_policy") or [])
     errors.extend(policy_errors)
     record_errors, record_warnings = validate_records(
@@ -396,7 +486,11 @@ def validate_book(
         catalog=catalog,
     )
     asset_errors, asset_warnings = validate_assets(book.get("asset_snapshots") or [], catalog, max_date)
-    credit_errors, credit_warnings = validate_credit_accounts(book.get("credit_accounts") or [], catalog)
+    credit_errors, credit_warnings = validate_credit_accounts(
+        book.get("credit_accounts") or [],
+        catalog,
+        default_mode=default_mode,
+    )
     installment_errors, installment_warnings = validate_installments(book.get("installment_plans") or [], catalog, max_date)
     reminder_errors, reminder_warnings = validate_reminders(book.get("repayment_reminders") or [], catalog, max_date)
     errors.extend(record_errors)

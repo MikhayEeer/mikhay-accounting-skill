@@ -6,11 +6,12 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+
+from ledgerlib import accumulate
 
 
 REQUIRED_FIELDS = ["名称", "预计金额", "类型", "优先级", "状态"]
@@ -44,14 +45,25 @@ def truthy(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "是", "可", "可以"}
 
 
-def load_wishlist(path: Path) -> list[dict[str, Any]]:
+def parse_day(value: Any) -> date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def load_wishlist(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(data, list):
-        return data
+        return data, []
     if isinstance(data, dict):
         items = data.get("items", data.get("wishlist", []))
-        if isinstance(items, list):
-            return items
+        buckets = data.get("budget_buckets", [])
+        if isinstance(items, list) and isinstance(buckets, list):
+            return items, buckets
     raise SystemExit(f"Unsupported wishlist JSON shape: {path}")
 
 
@@ -92,25 +104,69 @@ def validate_items(items: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
                 errors.append(f"{prefix}: invalid 目标日期")
         if status in {"已购买", "放弃"}:
             warnings.append(f"{prefix}: 状态={status}, analysis will skip buy recommendation")
+        if status == "放弃" and str(item.get("放弃原因", "")).strip() == "":
+            warnings.append(f"{prefix}: 放弃需要填写放弃原因")
+        if status == "已购买" and str(item.get("record_id", "")).strip() == "":
+            warnings.append(f"{prefix}: 已购买缺少 record_id")
+        if str(item.get("加入日期", "")).strip() == "":
+            warnings.append(f"{prefix}: 缺少加入日期，暂用文件里最早的日期")
+        raw_cool = item.get("冷静天数", "")
+        if str(raw_cool).strip() != "":
+            try:
+                cool = int(raw_cool)
+            except (TypeError, ValueError):
+                errors.append(f"{prefix}: 冷静天数 must be an integer")
+            else:
+                if cool < 0:
+                    errors.append(f"{prefix}: 冷静天数 cannot be negative")
+        raw_target = item.get("目标价", "")
+        if str(raw_target).strip() != "":
+            target_price = decimal_value(raw_target)
+            if target_price is None or target_price < 0:
+                errors.append(f"{prefix}: 目标价 must be a non-negative number")
+        joined = str(item.get("加入日期", "")).strip()
+        if joined and parse_day(joined) is None:
+            errors.append(f"{prefix}: invalid 加入日期")
     return errors, warnings
 
 
-def ledger_context(paths: list[Path]) -> tuple[Decimal | None, Decimal, Decimal, Decimal]:
+def validate_buckets(buckets: list[dict[str, Any]], items: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    names: set[str] = set()
+    for index, bucket in enumerate(buckets, 1):
+        prefix = f"budget_bucket[{index}]"
+        name = str(bucket.get("名称", "")).strip()
+        if not name:
+            errors.append(f"{prefix}: missing 名称")
+            continue
+        if name in names:
+            errors.append(f"{prefix}: duplicate bucket {name}")
+        names.add(name)
+        limit = decimal_value(bucket.get("额度"))
+        if limit is None or limit < 0:
+            errors.append(f"{prefix}: 额度 must be a non-negative number")
+        for field in ("起", "止"):
+            raw = str(bucket.get(field, "")).strip()
+            if raw and parse_day(raw) is None:
+                errors.append(f"{prefix}: invalid {field}")
+    for index, item in enumerate(items, 1):
+        bucket_name = str(item.get("额度桶", "")).strip()
+        if bucket_name and bucket_name not in names:
+            warnings.append(f"wishlist[{index}]: 未知额度桶 {bucket_name}")
+    return errors, warnings
+
+
+def ledger_context(paths: list[Path]) -> tuple[Decimal | None, Decimal, Decimal, Decimal, list[dict[str, Any]]]:
+    rows: list[dict[str, Any]] = []
     if not paths:
-        return None, Decimal("0"), Decimal("0"), Decimal("0")
-    totals: dict[str, Decimal] = defaultdict(Decimal)
+        return None, Decimal("0"), Decimal("0"), Decimal("0"), rows
     for path in paths:
-        for row in load_ledger(path):
-            tx_type = str(row.get("收支类型", "")).strip()
-            amount = abs(money(row.get("金额")))
-            if str(row.get("refund_of", "")).strip():
-                totals["退款"] += amount
-            elif tx_type:
-                totals[tx_type] += amount
-    income = totals["收入"]
-    expense = totals["支出"] - totals["退款"]
-    repayment = totals["还款"]
-    return income - expense - repayment, income, expense, repayment
+        rows.extend(load_ledger(path))
+    flows = accumulate(rows)
+    expense = flows.expense_net
+    surplus = flows.income - expense - flows.repayment - flows.investment_net
+    return surplus, flows.income, expense, flows.repayment, rows
 
 
 def asset_context(path: Path | None) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
@@ -203,6 +259,78 @@ def recommendation(item: dict[str, Any], pressure_level: str, priority: str) -> 
     return "建议", "压力较低"
 
 
+def cooling_days(item: dict[str, Any]) -> int:
+    raw = item.get("冷静天数", "")
+    if str(raw).strip() == "":
+        return 0 if str(item.get("优先级", "")).strip() == "P0" else 7
+    return int(raw)
+
+
+def file_origin(items: list[dict[str, Any]], buckets: list[dict[str, Any]]) -> date | None:
+    found: list[date] = []
+    for item in items:
+        for field in ("加入日期", "目标日期"):
+            parsed = parse_day(item.get(field))
+            if parsed is not None:
+                found.append(parsed)
+    for bucket in buckets:
+        for field in ("起", "止"):
+            parsed = parse_day(bucket.get(field))
+            if parsed is not None:
+                found.append(parsed)
+    return min(found) if found else None
+
+
+def cooling_end(item: dict[str, Any], origin: date | None) -> date | None:
+    start = parse_day(item.get("加入日期")) or origin
+    if start is None:
+        return None
+    return start + timedelta(days=cooling_days(item))
+
+
+def cooling_remaining(item: dict[str, Any], as_of: date, origin: date | None) -> int:
+    if cooling_days(item) <= 0:
+        return 0
+    end = cooling_end(item, origin)
+    if end is None or as_of >= end:
+        return 0
+    return (end - as_of).days
+
+
+def bucket_is_open(bucket: dict[str, Any], as_of: date) -> bool:
+    start = parse_day(bucket.get("起"))
+    stop = parse_day(bucket.get("止"))
+    if start is not None and as_of < start:
+        return False
+    if stop is not None and as_of > stop:
+        return False
+    return True
+
+
+def bucket_remaining(
+    bucket: dict[str, Any],
+    items: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+) -> tuple[Decimal, Decimal]:
+    name = str(bucket.get("名称", "")).strip()
+    limit = money(bucket.get("额度"))
+    ids = {
+        str(item.get("record_id", "")).strip()
+        for item in items
+        if str(item.get("额度桶", "")).strip() == name
+        and str(item.get("状态", "")).strip() == "已购买"
+        and str(item.get("record_id", "")).strip()
+    }
+    used = Decimal("0")
+    for row in records:
+        if str(row.get("id", "")).strip() not in ids:
+            continue
+        if str(row.get("收支类型", "")).strip() != "支出":
+            continue
+        used += abs(money(row.get("金额")))
+    return limit, limit - used
+
+
 def suggested_time(decision: str, pressure_level: str) -> str:
     if decision == "建议":
         return "现在或目标日期前"
@@ -219,10 +347,21 @@ def main() -> int:
     parser.add_argument("--ledger", action="append", type=Path, default=[], help="Ledger CSV/JSON file. Can be repeated.")
     parser.add_argument("--assets", type=Path, help="Assets JSON file.")
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--as-of", help="Date for the cooling-off clock, YYYY-MM-DD. Default: today.")
+    parser.add_argument("--due", action="store_true", help="Print wishes whose cooling-off period has ended.")
     args = parser.parse_args()
+    if args.as_of:
+        as_of = parse_day(args.as_of)
+        if as_of is None:
+            raise SystemExit("--as-of must be YYYY-MM-DD")
+    else:
+        as_of = date.today()
 
-    items = load_wishlist(args.wishlist)
+    items, buckets = load_wishlist(args.wishlist)
     errors, warnings = validate_items(items)
+    bucket_errors, bucket_warnings = validate_buckets(buckets, items)
+    errors.extend(bucket_errors)
+    warnings.extend(bucket_warnings)
     if errors:
         print(f"INVALID: {args.wishlist}")
         for error in errors:
@@ -234,16 +373,40 @@ def main() -> int:
         print(f"warnings: {len(warnings)}")
         for warning in warnings[:20]:
             print(f"- {warning}")
+    origin = file_origin(items, buckets)
+    if args.due:
+        print("\n## 冷静期到期")
+        due_rows = []
+        for item in items:
+            if str(item.get("状态", "")).strip() not in ACTIVE_STATUSES:
+                continue
+            if cooling_days(item) <= 0:
+                continue
+            end = cooling_end(item, origin)
+            if end is not None and end <= as_of:
+                due_rows.append((end, item))
+        if not due_rows:
+            print("- 无")
+        for end, item in sorted(due_rows, key=lambda pair: (pair[0], str(pair[1].get("名称", "")))):
+            print(f"- {item.get('名称', '')}: 冷静期至 {end.isoformat()}，已到期")
+        return 0
+
     if args.validate_only:
         return 0
 
-    surplus, income, expense, repayment = ledger_context(args.ledger)
+    surplus, income, expense, repayment, records = ledger_context(args.ledger)
     net_assets, asset_total, liability_total = asset_context(args.assets)
 
     print("\n## 财务上下文")
     print(f"- 月现金流结余: {fmt(surplus)}")
     print(f"- 收入/支出/还款: {fmt(income)} / {fmt(expense)} / {fmt(repayment)}")
     print(f"- 总资产/总负债/净资产: {fmt(asset_total)} / {fmt(liability_total)} / {fmt(net_assets)}")
+    open_buckets = [bucket for bucket in buckets if bucket_is_open(bucket, as_of)]
+    bucket_limits = {str(bucket.get("名称", "")).strip(): bucket_remaining(bucket, items, records) for bucket in open_buckets}
+    if bucket_limits:
+        print("\n## 额度桶")
+        for name, (limit, remaining_limit) in bucket_limits.items():
+            print(f"- {name}: 额度 {fmt(limit)}, 已用 {fmt(limit - remaining_limit)}, 剩余 {fmt(remaining_limit)}")
 
     print("\n## 预购建议")
     active_items = [item for item in items if str(item.get("状态", "")).strip() in ACTIVE_STATUSES]
@@ -252,7 +415,23 @@ def main() -> int:
         amount = money(item.get("预计金额"))
         pressure_level, reasons = pressure(amount, surplus, net_assets)
         priority = suggested_priority(item, pressure_level)
-        decision, decision_reason = recommendation(item, pressure_level, priority)
+        remaining_days = cooling_remaining(item, as_of, origin)
+        bucket_name = str(item.get("额度桶", "")).strip()
+        over_bucket = False
+        if bucket_name in bucket_limits:
+            _, remaining_limit = bucket_limits[bucket_name]
+            over_bucket = amount > remaining_limit
+        if remaining_days > 0:
+            decision = f"观望（冷静期剩 {remaining_days} 天）"
+            decision_reason = "冷静期未结束"
+        elif over_bucket:
+            decision = "不建议"
+            decision_reason = "超出额度桶剩余额度"
+        else:
+            decision, decision_reason = recommendation(item, pressure_level, priority)
+        target_price = decimal_value(item.get("目标价"))
+        if target_price is not None and target_price < amount:
+            decision_reason = f"{decision_reason}；等降价"
         rows.append((priority, pressure_level, item, decision, decision_reason, reasons))
 
     pressure_order = {"高": 0, "中": 1, "低": 2, "未知": 3}

@@ -50,7 +50,7 @@ def load_records(paths: list[Path]) -> list[dict[str, Any]]:
 
 def _apply_delta(tx_type: str, amount: Decimal, account: str, target: str, row: dict[str, Any]) -> list[tuple[str, Decimal]]:
     magnitude = abs(amount)
-    if is_refund(row):
+    if is_refund(row) or tx_type == "报销":
         return [(account, magnitude)]
     if tx_type == "支出":
         return [(account, -magnitude)]
@@ -68,6 +68,12 @@ def _apply_delta(tx_type: str, amount: Decimal, account: str, target: str, row: 
             return [(account, amount)]
         if target:
             return [(account, -magnitude), (target, magnitude)]
+    if tx_type == "投资":
+        if pair_id(row):
+            return [(account, amount)]
+        if target:
+            return [(account, amount), (target, -amount)]
+        return [(account, amount)]
     return []
 
 

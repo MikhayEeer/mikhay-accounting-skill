@@ -16,6 +16,10 @@ data/
   wishlist/
     2026/
       wishlist.json
+  aliases.json
+  recurring.json
+  items/
+    items.json
 raw/
   2026/
     2026-06/
@@ -32,6 +36,8 @@ reports/
 - Shard keys come from `os.path.basename`. Do not slice the full path. `data/ledger/2026/2026-06.json` is month `2026-06`; a bad slice of that path produces `r/202`.
 - Store asset snapshots separately when they are not part of the monthly ledger: `data/assets/YYYY/YYYY-MM.assets.json`.
 - Store planned purchases separately: `data/wishlist/YYYY/wishlist.json`.
+- Store alias windows in `data/aliases.json` and fixed expenses in `data/recurring.json`. `scripts/lint_ledger.py` reads them and does not modify the ledger.
+- Store subscriptions and holdings in `data/items/items.json`. Active subscriptions are also fixed expenses for lint.
 - Keep raw third-party bills under `raw/YYYY/YYYY-MM/`.
 - Keep generated CSV/JSON exports under `exports/YYYY/`.
 - Keep generated reports under `reports/YYYY/`.

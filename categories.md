@@ -16,6 +16,8 @@ Use these category and subcategory enums.
 - 还款: 白条还款, 月付还款
 - 转账: 个人转账
 - 退款: 退款, 其他
+- 报销: AI订阅, 差旅, 其他
+- 投资: 定投, 证券入金, 赎回, 理财
 
 ## Legacy Aliases
 
@@ -31,5 +33,7 @@ Existing data may contain these aliases. Normalize them during analysis:
 - `收支类型=收入` should use `类别=收入`.
 - `收支类型=还款` should use `类别=还款`.
 - `收支类型=转账` should use `类别=转账`.
-- `收支类型=退款` may use `类别=退款`, or the expense category being reversed. It must not use `收入`, `还款`, or `转账`.
+- `收支类型=退款` may use `类别=退款`, or the expense category being reversed. It must not use `收入`, `还款`, `转账`, `报销`, or `投资`.
+- `收支类型=报销` should use `类别=报销`. It is not income. `收入/报销` remains valid on old rows, still counts as income, and only warns.
+- `收支类型=投资` should use `类别=投资`. It is not spending and not income.
 - Unknown category or subcategory: use `待确认` in notes, do not invent silently.

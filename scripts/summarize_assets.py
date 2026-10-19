@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from ledgerlib import (
-    CREDIT_CARDS,
     accumulate,
+    credit_mode,
     default_account_catalog,
+    decimal_value,
     fmt,
+    fmt_pct,
     is_refund,
     last_working_day,
     load_file,
@@ -90,6 +92,10 @@ def print_section(title: str, rows: list[dict[str, Any]], snapshots: dict[str, d
     return assets, liabilities
 
 
+def _blank(value: Any) -> bool:
+    return str(value if value is not None else "").strip() == ""
+
+
 def net_charges(records: list[dict[str, Any]], card: str, start: date, end: date) -> Decimal:
     total = Decimal("0")
     for row in records:
@@ -99,9 +105,10 @@ def net_charges(records: list[dict[str, Any]], card: str, start: date, end: date
         if str(row.get("账户", "")).strip() != card:
             continue
         magnitude = abs(money(row.get("金额")))
-        if is_refund(row):
+        tx_type = str(row.get("收支类型", "")).strip()
+        if is_refund(row) or tx_type == "报销":
             total -= magnitude
-        elif str(row.get("收支类型", "")).strip() == "支出":
+        elif tx_type == "支出":
             total += magnitude
     return total
 
@@ -134,8 +141,14 @@ def forecast(data: dict[str, Any], records: list[dict[str, Any]], as_of: date, c
         print("- 无信贷账户")
     for row in cards:
         account = str(row.get("账户", "")).strip()
-        bill_day = int(row.get("账单日") or 1)
-        due_day = int(row.get("还款日") or 10)
+        bill_assumed = _blank(row.get("账单日"))
+        due_assumed = _blank(row.get("还款日"))
+        bill_day = 1 if bill_assumed else int(row.get("账单日"))
+        due_day = 10 if due_assumed else int(row.get("还款日"))
+        if bill_assumed:
+            print(f"- 警告: {account} 未填账单日，假定为 1 日")
+        if due_assumed:
+            print(f"- 警告: {account} 未填还款日，假定为 10 日")
         start = cycle_start(as_of, bill_day)
         previous = previous_cycle_start(start, bill_day)
         statement = max(net_charges(records, account, start, as_of), Decimal("0"))
@@ -149,15 +162,24 @@ def forecast(data: dict[str, Any], records: list[dict[str, Any]], as_of: date, c
         relation = "还款在发薪日前" if due <= payday else "还款在发薪日后"
         if due.year == as_of.year and due.month == as_of.month:
             projected_due += repayment
+        assumed = []
+        if bill_assumed:
+            assumed.append("假定账单日")
+        if due_assumed:
+            assumed.append("假定还款日")
+        suffix = f", {'、'.join(assumed)}" if assumed else ""
         print(
             f"- {account}: 预计账单 {fmt(statement)}, 预计还款 {fmt(repayment)}, "
-            f"还款日 {due.isoformat()}, 发薪日 {payday.isoformat()}, {relation}"
+            f"还款日 {due.isoformat()}, 发薪日 {payday.isoformat()}, {relation}{suffix}"
         )
-    cash = flows.income - flows.cash_expense_net - projected_due
-    print(
+    cash = flows.income - flows.cash_expense_net - projected_due - flows.investment_net
+    cash_line = (
         f"- 发薪日现金流: 收入 {fmt(flows.income)} - 现金花销净额 {fmt(flows.cash_expense_net)} "
-        f"- 预计还款 {fmt(projected_due)} = {fmt(cash)}"
+        f"- 预计还款 {fmt(projected_due)}"
     )
+    if flows.investment_net != 0:
+        cash_line += f" - 投资净投入 {fmt(flows.investment_net)}"
+    print(f"{cash_line} = {fmt(cash)}")
 
 
 def load_records(data: dict[str, Any], ledgers: list[Path]) -> list[dict[str, Any]]:
@@ -177,6 +199,7 @@ def main() -> int:
     parser.add_argument("--as-of", help="Date for inference and forecast, YYYY-MM-DD. Default: today.")
     parser.add_argument("--cc-method", choices=["A", "B"], default="A", help="Credit-card snapshot method. Default: A.")
     parser.add_argument("--forecast", action="store_true", help="Project card statements and payday cash flow.")
+    parser.add_argument("--items", type=Path, help="Optional items.json. Residual is listed and not added to any total.")
     args = parser.parse_args()
 
     book, errors = load_file(args.file)
@@ -189,6 +212,7 @@ def main() -> int:
         "installment_plans": book["installment_plans"],
         "repayment_reminders": book["repayment_reminders"],
         "account_policy": book["account_policy"],
+        "credit_policy": book.get("credit_policy") or {},
     }
     cutoff = parse_cutoff(args.as_of) if args.as_of else datetime.combine(date.today(), datetime.max.time().replace(microsecond=0))
     if args.as_of and cutoff is None:
@@ -227,17 +251,76 @@ def main() -> int:
     print(f"- 净资产: {fmt(included_assets - included_liabilities)}")
     print(f"- 备查净值: {fmt(excluded_assets - excluded_liabilities)}")
 
-    if data["credit_accounts"]:
-        print("\n## 信贷账户")
-        for row in sorted(data["credit_accounts"], key=lambda item: str(item.get("账户", ""))):
-            account = str(row.get("账户", ""))
-            marker = "备查" if catalog.get(account, {}).get("include") == "excluded" or account in {"Apple Card"} else "计入"
-            if account in CREDIT_CARDS or account in catalog:
-                marker = "备查" if catalog.get(account, {}).get("include") == "excluded" else "计入"
+    flows = accumulate(records, catalog)
+    if flows.invest_in or flows.invest_out or flows.invest_accounts:
+        print("\n## 投资")
+        print(f"- 投资净投入: {fmt(flows.investment_net)}")
+        print("- 市值只来自已有快照；不查行情，也不做定时更新")
+        printed_pnl = False
+        for account in sorted(flows.invest_accounts):
+            snap = snapshots.get(account)
+            if snap is None:
+                continue
+            market = money(snap.get("余额", snap.get("金额")))
+            contributed = flows.invest_by_account.get(account, Decimal("0"))
             print(
-                f"- {account}: 欠款 {fmt(money(row.get('欠款')))}, 额度 {row.get('额度', '')}, "
-                f"可用 {row.get('可用额度', '')}, {marker}"
+                f"- {account}: 快照市值 {fmt(market)}, 累计净投入 {fmt(contributed)}, "
+                f"浮动盈亏 {fmt(market - contributed)}"
             )
+            printed_pnl = True
+        if not printed_pnl:
+            print("- 无市值快照，不估算浮动盈亏")
+
+    if data["credit_accounts"]:
+        policy = data.get("credit_policy") or {}
+        print("\n## 信贷账户")
+        ordered = sorted(data["credit_accounts"], key=lambda item: str(item.get("账户", "")))
+        for row in ordered:
+            account = str(row.get("账户", ""))
+            marker = "备查" if catalog.get(account, {}).get("include") == "excluded" else "计入"
+            mode = credit_mode(row, policy)
+            debt = fmt(money(row.get("欠款")))
+            if mode == "with_limit":
+                print(
+                    f"- {account}: 欠款 {debt}, 额度 {row.get('额度', '')}, "
+                    f"可用 {row.get('可用额度', '')}, {marker}"
+                )
+            else:
+                print(f"- {account}: 欠款 {debt}, {marker}")
+        print("\n## 信用敞口")
+        total_debt = Decimal("0")
+        limit_debt = Decimal("0")
+        limit_sum = Decimal("0")
+        available_sum = Decimal("0")
+        any_limit = False
+        for row in ordered:
+            account = str(row.get("账户", ""))
+            debt = money(row.get("欠款"))
+            total_debt += debt
+            due = str(row.get("还款日", "") or "").strip() or "未填"
+            print(f"- {account}: 欠款 {fmt(debt)}, 还款日 {due}")
+            mode = credit_mode(row, policy)
+            if mode != "with_limit":
+                continue
+            any_limit = True
+            limit = decimal_value(row.get("额度"))
+            if limit is None:
+                print(f"- 警告: {account} with_limit 模式缺少额度")
+                continue
+            available = decimal_value(row.get("可用额度"))
+            if available is None:
+                available = limit - debt
+            elif abs((limit - debt) - available) > Decimal("1"):
+                print(f"- 警告: {account} 可用额度与额度-欠款相差超过 1 元")
+            limit_debt += debt
+            limit_sum += limit
+            available_sum += available
+        print(f"- 总欠款: {fmt(total_debt)}")
+        if any_limit and limit_sum > 0:
+            print(f"- 总可用额度: {fmt(available_sum)}")
+            print(f"- 使用率: {fmt_pct(limit_debt, limit_sum)}")
+        elif any_limit:
+            print("- 总可用额度: 未知")
 
     diffs = []
     for account, snap in sorted(snapshots.items()):
@@ -278,6 +361,17 @@ def main() -> int:
 
     if args.forecast:
         forecast(data, records, as_of_date, catalog or default_account_catalog())
+
+    items_path = args.items
+    if items_path is None:
+        default_items = Path("data/items/items.json")
+        if default_items.exists():
+            items_path = default_items
+    if items_path is not None:
+        from summarize_items import load_items, residual_of
+
+        print("\n## 备查物品")
+        print(f"- 残值合计: {fmt(residual_of(load_items(items_path)))}（不计入总资产、净资产、备查净值）")
     return 0
 
 

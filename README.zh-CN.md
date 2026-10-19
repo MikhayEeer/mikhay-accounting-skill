@@ -2,7 +2,7 @@
 
 # Mikhay 记账技能
 
-技能版本 `0.2.2`（见 `SKILL.md` frontmatter）。账本 `schema_version` 仍是 `0.2.0`。
+技能版本 `0.3.0`（见 `SKILL.md` frontmatter）。账本 `schema_version` 是 `0.3.0`。未改动的 `0.2.0` 账本仍能通过校验，统计结果不变。
 
 安装：`npx skills add MikhayEeer/mikhay-accounting-skill`
 
@@ -17,6 +17,24 @@
 ## 隐私
 
 本技能面向中文个人账本。流水、资产快照和愿望清单只留在本地的 `data/`、`raw/`、`exports/`。脚本不会上传账本。
+
+## AI native 记账和传统记账的区别
+
+这不是又一个记账 App。账留在本地文件里，由 agent 按脚本记账，而不是填一屏表单。
+
+1. **入口只有对话。** 文字、语音转写、截图都发给你正在用的 agent。截图能不能认出来，取决于你选的模型有没有视觉（VL）能力。本技能不做 OCR，也没有单独的截图导入入口。识别之后，由 agent 按 `categories.md` 整理成标准记录。
+2. **分类靠推断，不手选。** 只用技能自带的枚举，不新造类别。没把握就在备注写 `待确认`。你纠正后写入 `data/aliases.json`，下次照用。
+3. **校验是安全网。** 每次写入后，对涉及的分片跑 `validate_ledger.py` 和 `lint_ledger.py`。合计只抄脚本输出，模型不手算。技能没法强制挂钩子；这两个命令没跑，就不要说「已记录」。
+4. **预算是花钱前问一句。** 不做信封预算表。你说「想买某样东西」，agent 对照愿望清单的额度桶、信用敞口和冷静期给出判断（`analyze_wishlist.py`）。
+5. **提醒和市值交给你自己的定时任务。** 技能只把到期事项写成数据：还款日、续费日、冷静期结束、固定支出缺月。它不查行情，也不自己跑定时器。想定期提醒，或想定期记一笔市值快照，在宿主 agent 上自己设定时任务，避免这个技能为了轮询把 token 花掉。
+6. **本地纯文本。** JSON 和 CSV 放在 `data/`。用 git 还是网盘备份，由你决定。不做云同步。
+7. **刻意不做的：** 图表和看板、手动录入表单、App 内 OCR、银行直连和自动同步、行情追踪和收益率、完整的拆分交易、多人共享账本、信封预算界面、广告和理财推荐。
+
+账本里已经写成「收入/报销」的旧记录保持原样，仍然算收入。`scripts/migrate_0_3.py` 只打印预览，`--apply` 会拒绝。要不要改成新的「报销」类型，由用户自己决定。agent 看到旧写法时要说明这一点，不要擅自改写。
+
+待报销的钱算实际花销。报销到账后，另记一条 `报销`，用 `reimburse_of` 指向原支出，并把原支出的状态改成 `已报销`，实际花销这时才减少。不报「预计实际花销」。
+
+投资账户计入净资产。市值只来自用户要求记下的快照，有快照才打印浮动盈亏，不预测行情。
 
 ## 导入导出
 
@@ -130,7 +148,7 @@ dist/mikhay-accounting-skill.tar.gz
 dist/mikhay-accounting-skill.zip
 ```
 
-包内包含技能、参考文档、导入规则、`scripts/`、虚构示例、两份 README 和 `LICENSE`，不包含 `VERSION`、`tests/`、`.github/`、`tools/`、`data/`、`raw/`、`exports/`、`.claude/`、`.codex/`。`MANIFEST.json` 里的版本与 `SKILL.md` 的 `version` 相同。
+包内包含技能、参考文档、导入规则、`scripts/`、虚构示例、两份 README 和 `LICENSE`，不包含 `VERSION`、`tests/`、`.github/`、`tools/`、`data/`、`raw/`、`exports/`、`.claude/`、`.codex/`。`MANIFEST.json` 里的版本与 `SKILL.md` 的 `version` 相同。`.clawhubignore` 同样排除 `tests/` 和 `.github/`，发布到注册表时也不会打进包里。
 
 ## 使用 skill 与不使用 skill 的对比
 

@@ -24,6 +24,10 @@ FIELDS = [
     "note",
     "id",
     "refund_of",
+    "reimburse_of",
+    "报销状态",
+    "预计报销",
+    "item_id",
     "pairid",
     "target_account",
     "currency",
@@ -76,6 +80,8 @@ def export_json(path: Path, month: str, records: list[dict[str, Any]], source: d
         payload["repayment_reminders"] = source["repayment_reminders"]
     if source.get("account_policy"):
         payload["account_policy"] = source["account_policy"]
+    if source.get("credit_policy"):
+        payload["credit_policy"] = source["credit_policy"]
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 

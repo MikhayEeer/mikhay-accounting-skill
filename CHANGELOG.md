@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.0 - 2026-10-19
+
+Ledger `schema_version` is `0.3.0`. Skill version is `0.3.0`. `slug` stays `mikhay-accounting-skill`. `displayName` is unchanged. There is still no `VERSION` file.
+
+Unedited `0.2.0` books still validate, and their totals stay the same. Empty `schema_version`, `0.2.0`, and `0.3.0` are accepted. Other versions still warn.
+
+### Added
+
+- `收支类型=报销`, with `reimburse_of`, `报销状态`, and `预计报销`. Actual spending is gross expense minus refunds minus reimbursements that have arrived. Pending reimbursement stays in actual spending and is listed with its age. There is no projected-spending line. A reimbursement is not income.
+- `收支类型=投资`. Net investment is separate from spending and income. Investment accounts added with `account_policy` count toward net worth. Floating profit is printed only from a snapshot the user asked to record. The skill does not fetch prices and does not schedule market updates.
+- `credit_policy.mode`: `debt_only` (default) or `with_limit`. Reports include a credit-exposure section. Forecast labels an assumed bill day or repayment day instead of using one quietly.
+- `scripts/lint_ledger.py` (read-only): near-duplicates, alias windows, missing fixed expenses, and a monthly coverage report. `data/aliases.json` and `data/recurring.json` are optional inputs.
+- `data/items/items.json` and `scripts/summarize_items.py` for subscriptions and belongings. Residual value is printed at the end of the asset report and is not added to assets, net worth, or the excluded-account total.
+- Wishlist fields `加入日期`, `冷静天数`, `目标价`, `放弃原因`, `额度桶`, and `record_id`, plus top-level `budget_buckets` and `analyze_wishlist.py --due`.
+- `scripts/migrate_0_3.py` prints legacy `收入/报销` rows and investment keyword candidates. `--apply` is refused. Historical rows are not rewritten.
+
+### Compatibility
+
+- A legacy `收入/报销` row still counts as income and produces a warning. Whether to edit it is the user's decision.
+- New types and files are optional. An agent that sees the old reimbursement shape should say so and wait for the user.
+
 ## 0.2.2 - 2026-10-16
 
 Import no longer replaces an existing ledger shard unless `--overwrite` is set. Ledger `schema_version` stays `0.2.0`.

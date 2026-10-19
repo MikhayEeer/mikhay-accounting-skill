@@ -1,3 +1,5 @@
 # Maintainer-only packaging. Not part of the published end-user skill.
 tools/
 package_skill.py
+tests/
+.github/

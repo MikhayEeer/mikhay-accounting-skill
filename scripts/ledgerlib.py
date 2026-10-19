@@ -20,11 +20,16 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = "0.2.0"
+SCHEMA_VERSION = "0.3.0"
+# Empty and 0.2.0 books stay valid. Other values still warn.
+ACCEPTED_SCHEMA_VERSIONS = {"", "0.2.0", "0.3.0"}
 TAG_PREFIXES = ("trip:", "event:", "person:", "nature:")
-TYPES = {"支出", "收入", "还款", "转账", "退款"}
+TYPES = {"支出", "收入", "还款", "转账", "退款", "报销", "投资"}
 ACCOUNT_KINDS = {"资产", "负债"}
 INCLUDE_FLAGS = {"included", "excluded"}
+REIMBURSE_STATUSES = {"待报销", "已报销", "不报销"}
+CREDIT_MODES = {"debt_only", "with_limit"}
+INVEST_OUT_SUBCATEGORY = "赎回"
 
 INCLUDED_ASSETS = {"建设银行", "工商银行", "招商银行", "微信钱包", "支付宝", "美团"}
 INCLUDED_LIABILITIES = {"白条", "花呗", "美团月付", "抖音月付"}
@@ -50,6 +55,8 @@ CATEGORY_MAP = {
     "还款": {"白条还款", "月付还款"},
     "转账": {"个人转账"},
     "退款": {"退款", "其他"},
+    "报销": {"AI订阅", "差旅", "其他"},
+    "投资": {"定投", "证券入金", "赎回", "理财"},
 }
 
 CATEGORY_ALIASES = {"健康医疗": "医疗健康"}
@@ -58,7 +65,7 @@ LEGACY_PAIR_ALIASES = {
     ("购物消费", "饮料酒水"): ("食品餐饮", "饮料酒水"),
 }
 
-SPEND_CATEGORIES = set(CATEGORY_MAP) - {"收入", "还款", "转账"}
+SPEND_CATEGORIES = set(CATEGORY_MAP) - {"收入", "还款", "转账", "报销", "投资"}
 LEDGER_SUFFIXES = {".json", ".csv"}
 DECIMAL_RE = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?")
 CURRENCY_RE = re.compile(r"[A-Z]{3}")
@@ -160,6 +167,7 @@ def empty_book() -> dict[str, Any]:
         "installment_plans": [],
         "repayment_reminders": [],
         "account_policy": [],
+        "credit_policy": {},
         "inferred_snapshot": None,
         "is_ledger": True,
     }
@@ -178,6 +186,7 @@ def looks_like_ledger(data: Any) -> bool:
         "installment_plans",
         "repayment_reminders",
         "account_policy",
+        "credit_policy",
         "month",
         "schema_version",
     }
@@ -238,6 +247,8 @@ def load_file(path: Path) -> tuple[dict[str, Any], list[str]]:
             book["installment_plans"] = data.get("installment_plans", [])
             book["repayment_reminders"] = data.get("repayment_reminders", [])
             book["account_policy"] = data.get("account_policy", [])
+            policy = data.get("credit_policy") or {}
+            book["credit_policy"] = policy if isinstance(policy, dict) else {}
             book["inferred_snapshot"] = data.get("inferred_snapshot")
             book["month"] = data.get("month", "")
             return book, errors
@@ -355,6 +366,28 @@ def is_refund(row: dict[str, Any]) -> bool:
     if str(row.get("收支类型", "")).strip() == "退款":
         return True
     return bool(str(row.get("refund_of", "")).strip())
+
+
+def reimburse_ref(row: dict[str, Any]) -> str:
+    return str(row.get("reimburse_of", "")).strip()
+
+
+def reimburse_status(row: dict[str, Any]) -> str:
+    """Missing status means the expense is not waiting on reimbursement."""
+    text = str(row.get("报销状态", "") or "").strip()
+    return text or "不报销"
+
+
+def credit_mode(row: dict[str, Any] | None, policy: Any = None) -> str:
+    """Resolve debt_only vs with_limit. Default is debt_only."""
+    row_mode = str((row or {}).get("mode") or "").strip()
+    if row_mode in CREDIT_MODES:
+        return row_mode
+    if isinstance(policy, dict):
+        policy_mode = str(policy.get("mode") or "").strip()
+        if policy_mode in CREDIT_MODES:
+            return policy_mode
+    return "debt_only"
 
 
 def target_account(row: dict[str, Any]) -> str:
@@ -480,19 +513,34 @@ class FlowTotals:
         self.income = Decimal("0")
         self.expense_gross = Decimal("0")
         self.refunds = Decimal("0")
+        self.reimbursed = Decimal("0")
+        self.pending_reimburse = Decimal("0")
+        self.pending_items: list[dict[str, Any]] = []
+        self.invest_in = Decimal("0")
+        self.invest_out = Decimal("0")
+        self.invest_by_account: dict[str, Decimal] = defaultdict(Decimal)
+        self.invest_accounts: set[str] = set()
         self.repayment = Decimal("0")
         self.transfer_legs = Decimal("0")
         self.internal_transfer = Decimal("0")
         self.by_category_gross: dict[str, Decimal] = defaultdict(Decimal)
         self.by_category_refund: dict[str, Decimal] = defaultdict(Decimal)
+        self.by_category_reimburse: dict[str, Decimal] = defaultdict(Decimal)
         self.by_subcategory: dict[str, Decimal] = defaultdict(Decimal)
         self.by_subcategory_refund: dict[str, Decimal] = defaultdict(Decimal)
+        self.by_subcategory_reimburse: dict[str, Decimal] = defaultdict(Decimal)
         self.repayment_by_account: dict[str, Decimal] = defaultdict(Decimal)
         self.cash_expense_net = Decimal("0")
 
     @property
     def expense_net(self) -> Decimal:
-        return self.expense_gross - self.refunds
+        """实际花销. Pending reimbursement stays in this number until cash arrives."""
+        return self.expense_gross - self.refunds - self.reimbursed
+
+    @property
+    def investment_net(self) -> Decimal:
+        """投入 − 赎回. Not spending and not income."""
+        return self.invest_in - self.invest_out
 
 
 def _category_of(row: dict[str, Any]) -> tuple[str, str]:
@@ -502,13 +550,75 @@ def _category_of(row: dict[str, Any]) -> tuple[str, str]:
     return category, subcategory
 
 
+def _note_investment_leg(totals: FlowTotals, row: dict[str, Any], *, count_flow: bool) -> None:
+    amount = money(row.get("金额"))
+    account = str(row.get("账户", "")).strip()
+    if account:
+        totals.invest_by_account[account] += amount
+    _, subcategory = _category_of(row)
+    if count_flow:
+        magnitude = abs(amount)
+        if subcategory == INVEST_OUT_SUBCATEGORY:
+            totals.invest_out += magnitude
+        else:
+            totals.invest_in += magnitude
+    if target_account(row) and not pair_id(row):
+        target = target_account(row)
+        totals.invest_by_account[target] -= amount
+        totals.invest_accounts.add(target)
+        return
+    if subcategory == INVEST_OUT_SUBCATEGORY and amount < 0 and account:
+        totals.invest_accounts.add(account)
+    elif subcategory != INVEST_OUT_SUBCATEGORY and amount > 0 and account:
+        totals.invest_accounts.add(account)
+
+
+def _collect_pending(totals: FlowTotals, rows: list[dict[str, Any]]) -> None:
+    received: dict[str, Decimal] = defaultdict(Decimal)
+    for row in rows:
+        if str(row.get("收支类型", "")).strip() != "报销":
+            continue
+        ref = reimburse_ref(row)
+        if ref:
+            received[ref] += abs(money(row.get("金额")))
+    for row in rows:
+        if str(row.get("收支类型", "")).strip() != "支出":
+            continue
+        if reimburse_status(row) != "待报销":
+            continue
+        raw_expected = row.get("预计报销", "")
+        if raw_expected is None or str(raw_expected).strip() == "":
+            expected = abs(money(row.get("金额")))
+        else:
+            expected = abs(money(raw_expected))
+        pending = expected - received.get(record_id(row), Decimal("0"))
+        if pending <= 0:
+            continue
+        totals.pending_reimburse += pending
+        stamp = parse_time(row.get("时间"))
+        totals.pending_items.append(
+            {
+                "时间": stamp.date().isoformat() if stamp else "",
+                "金额": pending,
+                "备注": str(row.get("备注", "")).strip(),
+                "账户": str(row.get("账户", "")).strip(),
+                "id": record_id(row),
+            }
+        )
+
+
 def accumulate(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]] | None = None) -> FlowTotals:
-    """花销 counts spending net of refunds. 内部转账 counts each pair once."""
+    """花销 counts spending net of refunds and received reimbursements.
+
+    待报销 stays inside 实际花销 until a 报销 row arrives. 投资 is neither
+    spending nor income. 内部转账 counts each pair once.
+    """
     totals = FlowTotals()
     totals.count = len(rows)
     catalog = catalog or default_account_catalog()
     by_id = {record_id(row): row for row in rows if record_id(row)}
     pair_legs: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    invest_legs: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
     for row in rows:
         tx_type = str(row.get("收支类型", "")).strip()
@@ -535,6 +645,15 @@ def accumulate(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]] | 
             totals.by_subcategory[f"{category}/{subcategory}"] += magnitude
             if kind != "负债":
                 totals.cash_expense_net += magnitude
+        elif tx_type == "报销":
+            target = by_id.get(reimburse_ref(row))
+            if target is not None:
+                category, subcategory = _category_of(target)
+                totals.by_category_reimburse[category] += magnitude
+                totals.by_subcategory_reimburse[f"{category}/{subcategory}"] += magnitude
+            totals.reimbursed += magnitude
+            if kind != "负债":
+                totals.cash_expense_net -= magnitude
         elif tx_type == "还款":
             totals.repayment += magnitude
             totals.repayment_by_account[account or "未填账户"] += magnitude
@@ -545,6 +664,12 @@ def accumulate(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]] | 
                 pair_legs[pid].append(row)
             else:
                 totals.internal_transfer += magnitude
+        elif tx_type == "投资":
+            pid = pair_id(row)
+            if pid:
+                invest_legs[pid].append(row)
+            else:
+                _note_investment_leg(totals, row, count_flow=True)
 
     for legs in pair_legs.values():
         outgoing = [abs(money(leg.get("金额"))) for leg in legs if money(leg.get("金额")) < 0]
@@ -552,9 +677,19 @@ def accumulate(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]] | 
             totals.internal_transfer += outgoing[0]
         elif legs:
             totals.internal_transfer += max(abs(money(leg.get("金额"))) for leg in legs)
+    for legs in invest_legs.values():
+        if not legs:
+            continue
+        _note_investment_leg(totals, legs[0], count_flow=True)
+        for leg in legs[1:]:
+            _note_investment_leg(totals, leg, count_flow=False)
+    _collect_pending(totals, rows)
     return totals
 
 
 def category_net(totals: FlowTotals) -> dict[str, Decimal]:
-    names = set(totals.by_category_gross) | set(totals.by_category_refund)
-    return {name: totals.by_category_gross[name] - totals.by_category_refund[name] for name in names}
+    names = set(totals.by_category_gross) | set(totals.by_category_refund) | set(totals.by_category_reimburse)
+    return {
+        name: totals.by_category_gross[name] - totals.by_category_refund[name] - totals.by_category_reimburse[name]
+        for name in names
+    }
