@@ -199,6 +199,7 @@ def main() -> int:
     parser.add_argument("--as-of", help="Date for inference and forecast, YYYY-MM-DD. Default: today.")
     parser.add_argument("--cc-method", choices=["A", "B"], default="A", help="Credit-card snapshot method. Default: A.")
     parser.add_argument("--forecast", action="store_true", help="Project card statements and payday cash flow.")
+    parser.add_argument("--items", type=Path, help="Optional items.json. Residual is listed and not added to any total.")
     args = parser.parse_args()
 
     book, errors = load_file(args.file)
@@ -360,6 +361,17 @@ def main() -> int:
 
     if args.forecast:
         forecast(data, records, as_of_date, catalog or default_account_catalog())
+
+    items_path = args.items
+    if items_path is None:
+        default_items = Path("data/items/items.json")
+        if default_items.exists():
+            items_path = default_items
+    if items_path is not None:
+        from summarize_items import load_items, residual_of
+
+        print("\n## 备查物品")
+        print(f"- 残值合计: {fmt(residual_of(load_items(items_path)))}（不计入总资产、净资产、备查净值）")
     return 0
 
 

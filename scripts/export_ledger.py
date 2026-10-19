@@ -27,6 +27,7 @@ FIELDS = [
     "reimburse_of",
     "报销状态",
     "预计报销",
+    "item_id",
     "pairid",
     "target_account",
     "currency",

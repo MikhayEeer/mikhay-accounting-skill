@@ -183,6 +183,30 @@ Optional record fields:
 
 `scripts/migrate_0_3.py` only prints a preview of legacy `收入/报销` rows and investment keyword candidates. It does not accept `--apply`. Do not rewrite historical rows unless the user asks.
 
+Optional `item_id` links a ledger row to a subscription or holding in `data/items/items.json`. It is not a tag, and it does not add a tag namespace.
+
+## Subscriptions And Holdings
+
+`data/items/items.json` is a side file (`schema_version` `0.3.0`):
+
+```json
+{
+  "schema_version": "0.3.0",
+  "subscriptions": [
+    {"id": "sub-001", "名称": "某AI会员", "金额": 140, "currency": "CNY", "周期": "月", "续费日": "2026-11-03", "自动续费": true, "扣款账户": "招商银行", "可报销": true, "状态": "active", "note": ""}
+  ],
+  "holdings": [
+    {"id": "item-001", "名称": "相机", "购入价": 5000, "购入日期": "2026-03-01", "估计残值": 3200, "估值日期": "2026-10-01", "可增值": false, "record_id": "", "状态": "持有", "note": ""}
+  ]
+}
+```
+
+- `周期`: `月`, `季`, `年`, `周`.
+- Subscription `状态`: `active` or `已取消`. Holding `状态`: `持有`, `已卖出`, or `已送出`.
+- `scripts/summarize_items.py` prints the monthly subscription equivalent, renewals due within 30 days, auto-renewed reimbursable subscriptions with no matching `报销`, holding purchase total, residual total, and cost per day.
+- None of those totals are added to 总资产, 净资产, or 备查净值. `summarize_assets.py` prints one `备查物品` residual line at the end and does not add it.
+- When a belonging is sold, write `收入/其他` for the proceeds and set the holding `状态` to `已卖出`. Do not treat the residual as cash until that happens.
+
 A `pairid` group must contain exactly two `转账` rows, with equal absolute amounts, opposite signs, and different accounts. Validate a directory when the legs live in different shards.
 
 ## Currency

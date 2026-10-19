@@ -68,6 +68,7 @@ COLUMN_ALIASES = {
     "reimburse_of": ["reimburse_of", "报销关联"],
     "报销状态": ["报销状态"],
     "预计报销": ["预计报销"],
+    "item_id": ["item_id", "物品"],
     "pairid": ["pairid", "配对号"],
     "target_account": ["target_account", "目标账户", "对方账户"],
     "currency": ["currency", "币种"],
@@ -358,7 +359,7 @@ def normalize_record(row: dict[str, Any], source: str, fallback_account: str | N
         "tags": get_value(row, "tags"),
         "note": "; ".join(note_parts),
     }
-    for field in ("id", "refund_of", "reimburse_of", "报销状态", "预计报销", "pairid", "target_account"):
+    for field in ("id", "refund_of", "reimburse_of", "报销状态", "预计报销", "item_id", "pairid", "target_account"):
         value = get_value(row, field)
         if value:
             record[field] = value
