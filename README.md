@@ -2,7 +2,7 @@
 
 # Mikhay Accounting Skill
 
-Skill version `0.2.2` (see `SKILL.md` frontmatter). Ledger `schema_version` stays `0.2.0`.
+Skill version `0.3.0` (see `SKILL.md` frontmatter). Ledger `schema_version` is `0.3.0`. An unedited `0.2.0` book still validates, and its totals stay the same.
 
 Install: `npx skills add MikhayEeer/mikhay-accounting-skill`
 
@@ -17,6 +17,24 @@ Display name: `Mikhay 记账 - 资产管理/信用卡/预购清单/年月统计`
 ## Privacy
 
 This skill is for Chinese personal ledgers. Records, asset snapshots, and wishlists stay in local files under `data/`, `raw/`, and `exports/`. The scripts do not upload the ledger.
+
+## AI native 记账和传统记账的区别
+
+This is not another bookkeeping app. The books stay in local files, and the agent follows the scripts instead of a screen full of forms.
+
+1. **The only entrance is the conversation.** Text, a voice transcript, and screenshots all go to the agent you already use. Reading a screenshot depends on whether that model has vision (VL). This skill does not do OCR and does not add a separate screenshot-import entry. After the model reads the image, the agent files each row with the categories in `categories.md`.
+2. **Categories are inferred, not picked from a menu.** Use only the enums shipped with the skill. When unsure, put `待确认` in the note. After you correct a name, add it to `data/aliases.json` and use that next time.
+3. **Validation is the safety net.** After every write, run `validate_ledger.py` and `lint_ledger.py` on the shards you touched. Copy totals from the script output. The model does not add the numbers. The skill cannot install a hook. If those commands did not run, do not say the row was recorded.
+4. **A budget is a question asked before the purchase.** There is no envelope spreadsheet. When you say you want to buy something, the agent checks the wishlist bucket, credit exposure, and the cooling-off period (`analyze_wishlist.py`).
+5. **Reminders and market values are scheduled tasks you set yourself.** The skill only stores the dates: repayment days, renewal days, the end of a cooling-off period, and a missing fixed expense. It does not poll prices and it does not run a timer. A periodic reminder or a fresh market snapshot belongs on a scheduled task of the host agent, so this skill does not spend tokens in a loop.
+6. **Local plain text.** JSON and CSV live under `data/`. Back up with git or a drive you choose. There is no cloud sync.
+7. **Left out on purpose:** charts and dashboards, manual entry forms, in-app OCR, bank connections and automatic sync, price tracking and returns, full split transactions, shared ledgers, an envelope-budget screen, ads, and product recommendations.
+
+Rows already stored as `收入/报销` stay valid and still count as income. `scripts/migrate_0_3.py` only prints a preview and refuses `--apply`. Whether to rewrite those rows is your decision. Tell the agent that; do not rewrite them on your own.
+
+Money that is waiting to be reimbursed still counts as actual spending. When the cash arrives, add a `报销` row with `reimburse_of` and mark the original expense `已报销`. Actual spending goes down then. There is no "expected actual spending" line.
+
+Investment accounts are part of net worth. A market value exists only when you ask for a snapshot. Floating profit is printed from that snapshot and is not a forecast.
 
 ## Import and export
 
@@ -130,7 +148,7 @@ dist/mikhay-accounting-skill.tar.gz
 dist/mikhay-accounting-skill.zip
 ```
 
-The archive includes the skill, reference docs, import rules, `scripts/`, fictional examples, both READMEs, and `LICENSE`. It does not include `VERSION`, `tests/`, `.github/`, `tools/`, `data/`, `raw/`, `exports/`, `.claude/`, or `.codex/`. `MANIFEST.json` uses the same version as `SKILL.md`.
+The archive includes the skill, reference docs, import rules, `scripts/`, fictional examples, both READMEs, and `LICENSE`. It does not include `VERSION`, `tests/`, `.github/`, `tools/`, `data/`, `raw/`, `exports/`, `.claude/`, or `.codex/`. `MANIFEST.json` uses the same version as `SKILL.md`. `.clawhubignore` also leaves out `tests/` and `.github/`, so a registry publish does not pack them either.
 
 ## Using the skill compared with not using it
 

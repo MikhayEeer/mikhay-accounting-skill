@@ -413,7 +413,7 @@ def test_extended_example_and_docs() -> None:
     assert (ROOT / "CHANGELOG.md").exists()
     assert not (ROOT / "VERSION").exists()
     frontmatter = skill.split("---", 2)[1]
-    assert "version: 0.2.2" in frontmatter
+    assert "version: 0.3.0" in frontmatter
     assert 'displayName: "Mikhay 记账 - 资产管理/信用卡/预购清单/年月统计"' in frontmatter
     assert "homepage: https://github.com/MikhayEeer/mikhay-accounting-skill" in frontmatter
     assert "slug: mikhay-accounting-skill" in frontmatter
@@ -429,12 +429,22 @@ def test_extended_example_and_docs() -> None:
     assert "npx skills add MikhayEeer/mikhay-accounting-skill" in readme
     assert "npx skills add MikhayEeer/mikhay-accounting-skill" in readme_zh
     assert "--overwrite" in readme and "--overwrite" in readme_zh
+    for text in (readme, readme_zh):
+        assert "AI native 记账和传统记账的区别" in text
+        assert "VL" in text
+        assert "截图" in text or "screenshot" in text
+        assert "定时任务" in text or "scheduled task" in text
+    assert "刻意不做的" in readme_zh
+    assert "Left out on purpose" in readme
+    assert "收入/报销" in readme_zh
     faq = (ROOT / "references" / "faq.md").read_text(encoding="utf-8")
     assert faq.split("## 1.", 1)[0].find("--overwrite") != -1
     assert not (ROOT / "scripts" / "package_skill.py").exists()
     assert (ROOT / "tools" / "package_skill.py").is_file()
     ignore = (ROOT / ".clawhubignore").read_text(encoding="utf-8")
     assert "tools/" in ignore
+    assert "tests/" in ignore
+    assert ".github/" in ignore
 
 
 def test_package_omits_version_file_tests_and_github(tmp_path: Path) -> None:
@@ -456,7 +466,7 @@ def test_package_omits_version_file_tests_and_github(tmp_path: Path) -> None:
     assert any(name.endswith("examples/workflow-credit-repay.md") for name in names)
     assert any(name.endswith("README.zh-CN.md") for name in names)
     manifest = json.loads(archive.read("mikhay-accounting-skill/MANIFEST.json"))
-    assert manifest["version"] == "0.2.2"
+    assert manifest["version"] == "0.3.0"
 
 
 BILL_CSV = (

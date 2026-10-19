@@ -1,6 +1,6 @@
 # Agent Handoff
 
-Use this folder as a self-contained accounting skill. Skill version `0.2.2` lives in `SKILL.md` frontmatter. Ledger `schema_version` stays `0.2.0`. Homepage: https://github.com/MikhayEeer/mikhay-accounting-skill. The ledger stays on the local machine and is not uploaded. This skill is for Chinese personal ledgers.
+Use this folder as a self-contained accounting skill. Skill version `0.3.0` lives in `SKILL.md` frontmatter. Ledger `schema_version` is `0.3.0`; unedited `0.2.0` books still validate. Homepage: https://github.com/MikhayEeer/mikhay-accounting-skill. The ledger stays on the local machine and is not uploaded. This skill is for Chinese personal ledgers. `slug` stays `mikhay-accounting-skill`.
 
 ## Start
 
