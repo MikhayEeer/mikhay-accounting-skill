@@ -65,6 +65,9 @@ COLUMN_ALIASES = {
     "note": ["note", "导入备注"],
     "id": ["id", "交易单号"],
     "refund_of": ["refund_of", "退款关联"],
+    "reimburse_of": ["reimburse_of", "报销关联"],
+    "报销状态": ["报销状态"],
+    "预计报销": ["预计报销"],
     "pairid": ["pairid", "配对号"],
     "target_account": ["target_account", "目标账户", "对方账户"],
     "currency": ["currency", "币种"],
@@ -223,6 +226,9 @@ def normalize_time(value: str) -> str:
 
 
 def normalize_type(raw_type: str, amount: Decimal | None, text: str) -> str:
+    stripped = raw_type.strip()
+    if stripped in {"支出", "收入", "还款", "转账", "退款", "报销", "投资"}:
+        return stripped
     raw = raw_type.lower()
     text_lower = text.lower()
     if "退款" in raw or (not raw and "退款" in text_lower):
@@ -268,6 +274,14 @@ def classify(row: dict[str, Any], tx_type: str, text: str, account: str) -> tupl
             if category not in {"收入"} and any(keyword.lower() in lowered for keyword in keywords):
                 return category, subcategory, False
         return "退款", "退款", False
+    if tx_type == "报销":
+        if category in CATEGORY_MAP and subcategory in CATEGORY_MAP.get(category, ()):
+            return category, subcategory, False
+        return "报销", "其他", False
+    if tx_type == "投资":
+        if category in CATEGORY_MAP and subcategory in CATEGORY_MAP.get(category, ()):
+            return category, subcategory, False
+        return "投资", "理财", False
     if tx_type == "收入":
         for category, subcategory, keywords in KEYWORD_RULES:
             if category == "收入" and any(k.lower() in text.lower() for k in keywords):
@@ -307,7 +321,12 @@ def normalize_record(row: dict[str, Any], source: str, fallback_account: str | N
     if amount is None:
         amount = Decimal("0")
     tx_type = normalize_type(get_value(row, "收支类型"), amount, text)
-    signed_amount = -abs(amount) if tx_type == "支出" else abs(amount)
+    if tx_type == "支出":
+        signed_amount = -abs(amount)
+    elif tx_type == "投资":
+        signed_amount = amount
+    else:
+        signed_amount = abs(amount)
     currency = get_value(row, "currency").upper() or "CNY"
     original_amount = parse_amount(get_value(row, "original_amount"))
     fx_rate = parse_amount(get_value(row, "fx_rate"))
@@ -339,7 +358,7 @@ def normalize_record(row: dict[str, Any], source: str, fallback_account: str | N
         "tags": get_value(row, "tags"),
         "note": "; ".join(note_parts),
     }
-    for field in ("id", "refund_of", "pairid", "target_account"):
+    for field in ("id", "refund_of", "reimburse_of", "报销状态", "预计报销", "pairid", "target_account"):
         value = get_value(row, field)
         if value:
             record[field] = value

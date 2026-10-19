@@ -328,7 +328,7 @@ def test_import_shard_basename_and_schema_version(tmp_path: Path) -> None:
     assert full[full.index("ledger") + 5 : full.index("ledger") + 10] == "r/202"
     assert shard_key(day_file, "day") == "2026-06-01"
     payload = json.loads(day_file.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "0.2.0"
+    assert payload["schema_version"] == "0.3.0"
     month = run("import_ledger.py", str(source), "--shard", "month", "--year-dirs", "--output", str(tmp_path / "month"))
     assert month.returncode == 0, month.stdout + month.stderr
     month_file = tmp_path / "month" / "2026" / "2026-06.json"
@@ -532,7 +532,7 @@ def test_write_json_refuses_existing_file_unless_overwrite(tmp_path: Path) -> No
     assert path.read_text(encoding="utf-8") == "old\n"
     import_ledger.write_json(path, [], "2026-06", overwrite=True)
     loaded = json.loads(path.read_text(encoding="utf-8"))
-    assert loaded["schema_version"] == "0.2.0"
+    assert loaded["schema_version"] == "0.3.0"
     assert loaded["records"] == []
 
 

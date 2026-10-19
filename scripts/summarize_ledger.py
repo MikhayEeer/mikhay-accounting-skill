@@ -8,6 +8,7 @@ not part of 花销. Totals always come from scanning every file passed in.
 from __future__ import annotations
 
 import argparse
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from ledgerlib import (
     iter_ledger_files,
     load_buckets,
     load_file,
+    parse_time,
 )
 
 
@@ -47,7 +49,15 @@ def main() -> int:
     parser.add_argument("--month", help="Filter by YYYY-MM after the full scan.")
     parser.add_argument("--shard", choices=["day", "month"], help="Index scanned files by day or month basename.")
     parser.add_argument("--buckets", type=Path, help="Optional bucket map. Omit to skip bucket totals.")
+    parser.add_argument("--as-of", help="Date used to age 待报销 rows, YYYY-MM-DD. Default: today.")
     args = parser.parse_args()
+    if args.as_of:
+        parsed_as_of = parse_time(args.as_of)
+        if parsed_as_of is None:
+            raise SystemExit("--as-of must be YYYY-MM-DD")
+        as_of = parsed_as_of.date()
+    else:
+        as_of = date.today()
 
     records, files = collect_records(args.paths)
     if not files:
@@ -73,12 +83,15 @@ def main() -> int:
     print(f"- 支出: {fmt(totals.expense_gross)}")
     print(f"- 花销毛额: {fmt(totals.expense_gross)}")
     print(f"- 退款: {fmt(totals.refunds)}")
+    print(f"- 已报销: {fmt(totals.reimbursed)}")
+    print(f"- 待报销: {fmt(totals.pending_reimburse)}")
     print(f"- 花销净额: {fmt(totals.expense_net)}")
     print(f"- 还款: {fmt(totals.repayment)}")
     print(f"- 转账: {fmt(totals.transfer_legs)}")
     print(f"- 内部转账: {fmt(totals.internal_transfer)}")
+    print(f"- 投资净投入: {fmt(totals.investment_net)}")
     print(f"- 结余(不含还款): {fmt(totals.income - totals.expense_net)}")
-    print(f"- 现金流结余: {fmt(totals.income - totals.expense_net - totals.repayment)}")
+    print(f"- 现金流结余: {fmt(totals.income - totals.expense_net - totals.repayment - totals.investment_net)}")
     print("\n## 双口径")
     print(f"- 花销口径: 毛额 {fmt(totals.expense_gross)}, 退款 {fmt(totals.refunds)}, 净额 {fmt(totals.expense_net)}")
     print(f"- 内部转账口径: {fmt(totals.internal_transfer)}")
@@ -90,8 +103,8 @@ def main() -> int:
             print(f"- {name}: {fmt(value)} ({fmt_pct(value, net_whole)})")
 
     subcategory_net = {
-        name: totals.by_subcategory[name] - totals.by_subcategory_refund[name]
-        for name in set(totals.by_subcategory) | set(totals.by_subcategory_refund)
+        name: totals.by_subcategory[name] - totals.by_subcategory_refund[name] - totals.by_subcategory_reimburse[name]
+        for name in set(totals.by_subcategory) | set(totals.by_subcategory_refund) | set(totals.by_subcategory_reimburse)
     }
     if subcategory_net:
         print("\n## 支出Top子类")
@@ -111,6 +124,24 @@ def main() -> int:
         whole = sum((value for _, value in rolled), Decimal("0"))
         for name, value in rolled:
             print(f"- {name}: {fmt(value)} ({fmt_pct(value, whole)})")
+
+    print("\n## 待报销")
+    if not totals.pending_items:
+        print("- 无")
+    else:
+        for item in totals.pending_items:
+            when = str(item.get("时间") or "")
+            waited = ""
+            flag = ""
+            if when:
+                stamped = parse_time(when)
+                if stamped is not None:
+                    days = (as_of - stamped.date()).days
+                    waited = f" 已等待 {days} 天"
+                    if days > 30:
+                        flag = " 超过30天"
+            label = str(item.get("备注") or item.get("id") or "未命名")
+            print(f"- {when} {label}: {fmt(item['金额'])}{waited}{flag}")
     return 0
 
 

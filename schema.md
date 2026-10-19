@@ -7,7 +7,7 @@ Primary format: Chinese CSV or JSON.
 Use these 9 fields. Extra fields documented below are optional, so older ledgers stay valid:
 
 - `时间`: `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
-- `收支类型`: `支出`, `收入`, `还款`, `转账`, `退款`.
+- `收支类型`: `支出`, `收入`, `还款`, `转账`, `退款`, `报销`, `投资`.
 - `金额`: signed number.
 - `类别`: top category.
 - `子类`: second-level category.
@@ -24,13 +24,13 @@ Preferred monthly file:
 
 ```json
 {
-  "schema_version": "0.2.0",
+  "schema_version": "0.3.0",
   "month": "2026-06",
   "records": []
 }
 ```
 
-Files written by the scripts include `schema_version`. A missing `schema_version` is a legacy file and still validates.
+Files written by the scripts include `schema_version` `0.3.0`. A missing `schema_version`, `0.2.0`, and `0.3.0` all validate with no version warning. Any other value warns and still loads. New fields below are optional, so an unedited 0.2.0 book stays valid and its totals stay the same.
 
 A JSON list is also accepted and treated as records.
 
@@ -43,6 +43,8 @@ Preferred storage path: `data/ledger/YYYY/YYYY-MM.json`.
 - `还款`: 还负债；不混入普通支出统计。
 - `转账`: 账户间移动；不计入收入或支出。
 - `退款`: 冲回一笔支出。可以只写 `收支类型=退款`，也可以再写 `refund_of` 指向原支出的 `id`。报表同时给出毛额和净额，退款不计入收入。
+- `报销`: 报销到账。金额为正，不计入收入。可选 `reimburse_of` 指向原 `支出` 的 `id`，校验方式和 `refund_of` 相同。指到原支出时，金额冲回那个类别。
+- `投资`: 现金和投资账户之间的移动。不进花销，不进收入。成对记录和转账一样，同一个 `pairid`，一正一负；只记得一边时写 `target_account=`。赎回方向相反。报表单列「投资净投入 = 投入 − 赎回」。
 
 ## Amount Sign Rules
 
@@ -51,7 +53,9 @@ Preferred storage path: `data/ledger/YYYY/YYYY-MM.json`.
 - `还款`: 正数。
 - `转账`: 旧的单边记录用正数。`pairid` 的两条腿一正一负。
 - `退款`: 正数，表示钱退回来。
-- 统计展示时，`支出`、`还款`、`转账` 使用正数合计。花销净额 = 支出毛额 - 退款。
+- `报销`: 正数，表示报销款回到原账户。
+- `投资`: 成对记录一正一负。单边投入在现金账户用负数，单边赎回在现金账户用正数。
+- 统计展示时，`支出`、`还款`、`转账` 使用正数合计。实际花销 = 支出毛额 − 退款 − 已报销。待报销的钱仍算在实际花销里，到账并写成 `报销` 之后才扣减。不另报「预计实际花销」。旧的 `收入/报销` 不改写，仍然算收入，校验只给警告。
 
 ## Account Enums
 
@@ -114,6 +118,10 @@ For credit account debt and limits:
 
 `账户` must be a liability account.
 
+`credit_policy.mode` is `debt_only` (default) or `with_limit`. A `credit_accounts` row may set `mode` to override the file. `debt_only` reports debt and the repayment day, and does not print empty limits. `with_limit` warns when `额度` is missing, and when `可用额度` differs from `额度 − 欠款` by more than 1.
+
+Forecast does not invent a silent bill day or repayment day. A missing `账单日` is reported as assumed day 1, and a missing `还款日` as assumed day 10.
+
 ## Optional Installment Plans
 
 For installment strategy:
@@ -145,6 +153,8 @@ For reminders, use a separate JSON file if needed:
 - `还款`: 付款账户减少；目标负债账户减少。目标账户写在 `note` 或 `备注`，如 `target_account=花呗`。
 - `转账`: 来源账户减少；目标账户增加。目标账户同样用 `target_account=...`。
 - `退款`: 原账户余额回升；信用卡欠款下降。退款不记成收入。
+- `报销`: 原账户余额回升；不记成收入。到账时新增一条 `报销`，`reimburse_of` 指向原支出，并把原支出的 `报销状态` 改为 `已报销`。在那之前，`待报销` 仍算实际花销。
+- `投资`: 和成对转账一样移动余额。投资账户用 `account_policy` 声明为资产且 `纳入=included`，计入净资产。市值只来自用户主动写入的 `asset_snapshots`，不查行情，也不做定时更新。有快照时才打印「浮动盈亏 = 快照市值 − 累计净投入」。
 
 ## Tags
 
@@ -165,8 +175,13 @@ Optional record fields:
 
 - `id`: stable id inside the validated file set.
 - `refund_of`: id of the original `支出`.
-- `pairid`: shared id of the two transfer legs.
+- `reimburse_of`: id of the original `支出`. Only on `报销`.
+- `报销状态`: on an `支出`, one of `待报销`, `已报销`, `不报销`. Missing means `不报销`.
+- `预计报销`: amount still expected back. Missing means the whole expense. Used only to list 待报销, not to reduce 实际花销.
+- `pairid`: shared id of the two transfer or investment legs.
 - `target_account`: other account. `note` may still say `target_account=花呗`.
+
+`scripts/migrate_0_3.py` only prints a preview of legacy `收入/报销` rows and investment keyword candidates. It does not accept `--apply`. Do not rewrite historical rows unless the user asks.
 
 A `pairid` group must contain exactly two `转账` rows, with equal absolute amounts, opposite signs, and different accounts. Validate a directory when the legs live in different shards.
 

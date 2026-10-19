@@ -26,6 +26,7 @@ from ledgerlib import (
     pair_id,
     parse_tags,
     record_id,
+    reimburse_ref,
 )
 
 
@@ -33,6 +34,7 @@ class TagRollup:
     def __init__(self) -> None:
         self.gross = Decimal("0")
         self.refunds = Decimal("0")
+        self.reimbursed = Decimal("0")
         self.transfer = Decimal("0")
         self.day_gross: dict[str, Decimal] = defaultdict(Decimal)
         self.day_refund: dict[str, Decimal] = defaultdict(Decimal)
@@ -41,7 +43,7 @@ class TagRollup:
 
     @property
     def net(self) -> Decimal:
-        return self.gross - self.refunds
+        return self.gross - self.refunds - self.reimbursed
 
 
 def collect(paths: list[Path]) -> tuple[list[dict[str, Any]], list[Path]]:
@@ -96,6 +98,13 @@ def rollup(records: list[dict[str, Any]]) -> dict[str, TagRollup]:
                 item.cat_refund[category] += magnitude
             continue
         tx_type = str(row.get("收支类型", "")).strip()
+        if tx_type == "报销":
+            target = by_id.get(reimburse_ref(row))
+            tags = parse_tags(target.get("tags")) if target is not None and parse_tags(target.get("tags")) else parse_tags(row.get("tags"))
+            magnitude = abs(money(row.get("金额")))
+            for tag in tags:
+                stats[tag].reimbursed += magnitude
+            continue
         if tx_type == "支出":
             tags = parse_tags(row.get("tags"))
             magnitude = abs(money(row.get("金额")))
@@ -161,6 +170,8 @@ def main() -> int:
         print(f"- 毛额: {fmt(item.gross)}")
         print(f"- 净额: {fmt(item.net)}")
         print(f"- 退款: {fmt(item.refunds)}")
+        if item.reimbursed:
+            print(f"- 已报销: {fmt(item.reimbursed)}")
         if item.transfer:
             print(f"- 内部转账: {fmt(item.transfer)}")
         days = sorted(set(item.day_gross) | set(item.day_refund))
