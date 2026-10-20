@@ -434,7 +434,7 @@ def test_extended_example_and_docs() -> None:
     assert not (ROOT / "VERSION").exists()
     frontmatter = skill.split("---", 2)[1]
     assert "version: 0.4.2" in frontmatter
-    assert 'displayName: "Mikhay 记账 - 资产管理/信用卡/预购清单/年月统计"' in frontmatter
+    assert 'displayName: "Accounting|记账 - 资产管理/信用卡/预购清单/年月统计"' in frontmatter
     assert "homepage: https://github.com/MikhayEeer/mikhay-accounting-skill" in frontmatter
     assert "slug: mikhay-accounting-skill" in frontmatter
     assert "--overwrite" in skill

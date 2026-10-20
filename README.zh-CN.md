@@ -12,7 +12,7 @@
 
 面向中文个人账本，处理 CSV、JSON、XLSX。给代理看的操作说明在 `SKILL.md`（中文）。常见错误见 `references/faq.md`，报错恢复见 `references/troubleshooting.md`。
 
-显示名：`Mikhay 记账 - 资产管理/信用卡/预购清单/年月统计`。
+显示名：`Accounting|记账 - 资产管理/信用卡/预购清单/年月统计`。
 
 ## 隐私
 

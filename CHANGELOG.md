@@ -18,6 +18,7 @@ Skill version is `0.4.2`. Ledger `schema_version` stays `0.3.0`; old books keep 
 - Removed the payday assumption and `last_working_day`. `--forecast` reports each card's statement, repayment, and due date, plus the current-month cash flow. The skill no longer guesses when salary arrives.
 - Removed the 30-day 待报销 warning. Pending reimbursement age is still shown, without a threshold judgment.
 - Removed the second alias mechanism: `data/aliases.json` and `--aliases` are gone; one account file defines accounts, aliases, and alias windows.
+- `displayName` is now `Accounting|记账 - 资产管理/信用卡/预购清单/年月统计`, so English and Chinese search both match. 
 - Duplicate-looking records with the same time/type/amount/account/note are now a warning instead of an error. A duplicate `id` is still an error.
 - A zero-amount expense marked `待报销` is flagged, and does not print pending money in summaries.
 - `data/items/items.json`, `data/recurring.json`, and the import rules are discovered next to the ledger, not only under the current directory.

@@ -12,7 +12,7 @@ License: MIT, copyright MikhayEeer. Full text in [LICENSE](LICENSE).
 
 Chinese personal ledger workflow for CSV, JSON, and XLSX files. Agent instructions stay in Chinese in `SKILL.md`. Common mistakes: `references/faq.md`. Recovery: `references/troubleshooting.md`.
 
-Display name: `Mikhay 记账 - 资产管理/信用卡/预购清单/年月统计`.
+Display name: `Accounting|记账 - 资产管理/信用卡/预购清单/年月统计`.
 
 ## Privacy
 

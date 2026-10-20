@@ -1,8 +1,8 @@
 ---
 slug: mikhay-accounting-skill
-displayName: "Mikhay 记账 - 资产管理/信用卡/预购清单/年月统计"
+displayName: "Accounting|记账 - 资产管理/信用卡/预购清单/年月统计"
 version: 0.4.2
-summary: "中文个人记账。账户和类别由用户定义，可配置别名；流水、资产快照、信用卡和愿望清单分开存放；合计只抄脚本；退款不是收入；净额写成同一条。"
+summary: "Accounting / 中文个人记账。账户和类别由用户定义，可配置别名；流水、资产快照、信用卡和愿望清单分开存放；合计只抄脚本；退款不是收入；净额写成同一条。"
 license: MIT
 name: mikhay-accounting-skill
 description: Chinese personal accounting workflow for CSV/JSON/XLSX ledger, asset, and wishlist files. Use when the user asks to import, export, record, classify, validate, summarize, store, analyze records, or evaluate planned purchases with fields like 时间, 收支类型, 金额, 类别, 子类, 账户, 备注, tags, note; supports user-defined accounts and categories with aliases in data/accounts.json and data/categories.json, 支出, 收入, 还款, 转账, 退款, 报销, zero and netted amounts, trip/event/person/nature tags, day or month shards, transfer pairs, multi-currency CNY totals, included and excluded accounts, credit-card snapshot methods, payday forecast, third-party bill conversion, and monthly reports. Local ledger only; files are not uploaded.
