@@ -163,7 +163,16 @@ python scripts/analyze_wishlist.py data/wishlist/2026/wishlist.json --ledger dat
 
 A wishlist item is not a ledger record. Write an `支出` only after the purchase happens.
 
-## Maintainer packaging
+## Maintainer packaging and publish
+
+`tools/publish.py` publishes committed `HEAD` to ClawHub, SkillHub, and ModelScope. It reads tokens from `~/.secrets/secrets.json` (or environment variables) and never writes them into the repository or per-tool config files.
+
+```bash
+python tools/publish.py --dry-run
+python tools/publish.py --platform clawhub
+python tools/publish.py --platform skillhub
+python tools/publish.py --platform modelscope
+```
 
 `tools/package_skill.py` is maintainer-only. It is not an end-user ledger command. ClawHub publish ignores `tools/` via `.clawhubignore`, and the archive itself omits `tools/` and `package_skill.py`.
 
