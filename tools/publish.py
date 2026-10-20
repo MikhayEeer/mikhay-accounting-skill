@@ -83,7 +83,7 @@ def load_values() -> dict[str, str]:
         "SKILLHUB_TOKEN": get("SKILLHUB_TOKEN"),
         "SKILLHUB_REGISTRY": get("SKILLHUB_REGISTRY", "https://skill.xfyun.cn"),
         "SKILLHUB_NAMESPACE": get("SKILLHUB_NAMESPACE"),
-        "MODELSCOPE_API_KEY": get("MODELSCOPE_API_KEY"),
+        "MODELSCOPE_API_KEY": get("MODELSCOPE_API_KEY") or get("MODELSCOPE_API_TOKEN"),
         "MODELSCOPE_ENDPOINT": get("MODELSCOPE_ENDPOINT", "https://modelscope.cn"),
         "MODELSCOPE_OWNER": get("MODELSCOPE_OWNER"),
         "MODELSCOPE_SKILL_NAME": get("MODELSCOPE_SKILL_NAME", DEFAULT_SLUG),
