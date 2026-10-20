@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Maintainer-only: publish this skill to ClawHub, SkillHub, and ModelScope.
+"""Maintainer-only: publish this skill to ClawHub, SkillHub.cn, and ModelScope.
 
-Credentials are read from the environment or from ~/.secrets/secrets.json.
-Nothing is written into the repository, and no tool-specific token file is
-created: ClawHub gets a temporary config file, SkillHub uses SKILLHUB_TOKEN,
-ModelScope uses MODELSCOPE_API_KEY.
+Credentials are read from one clearly named file per platform under
+~/.secrets/publishing/ (see its README). Nothing is written into the
+repository, and no tool-specific token file is created.
 
 Examples:
 
@@ -22,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import urllib.error
 import urllib.parse
@@ -32,7 +32,8 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-SECRETS_FILE = Path.home() / ".secrets" / "secrets.json"
+PUBLISH_DIR = Path.home() / ".secrets" / "publishing"
+SKILLHUB_KIT_URL = "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/install/latest.tar.gz"
 SOURCE_URL = "https://github.com/MikhayEeer/mikhay-accounting-skill"
 DEFAULT_SLUG = "mikhay-accounting-skill"
 DEFAULT_CATEGORIES = "finance,productivity"
@@ -59,44 +60,47 @@ def read_frontmatter() -> dict[str, str]:
     return fields
 
 
-def load_values() -> dict[str, str]:
-    """Environment first, then ~/.secrets/secrets.json values."""
-    values: dict[str, str] = {}
+def is_placeholder(value: str) -> bool:
+    text = value.strip()
+    return text.startswith("<") and text.endswith(">")
+
+
+def load_platform_config(platform: str) -> dict[str, str]:
+    """Read ~/.secrets/publishing/<platform>.json, with environment overrides."""
+    path = PUBLISH_DIR / f"{platform}.json"
     try:
-        data = json.loads(SECRETS_FILE.read_text(encoding="utf-8-sig"))
-        raw = data.get("values", {})
-        if isinstance(raw, dict):
-            values = {str(key): str(value) for key, value in raw.items()}
-    except (OSError, json.JSONDecodeError):
-        pass
-
-    def get(name: str, default: str = "") -> str:
-        value = os.environ.get(name, "").strip() or values.get(name, "").strip()
-        if value.startswith("<") and value.endswith(">"):
-            return default
-        return value or default
-
-    return {
-        "CLAWHUB_TOKEN": get("CLAWHUB_TOKEN"),
-        "CLAWHUB_OWNER": get("CLAWHUB_OWNER"),
-        "CLAWHUB_REGISTRY": get("CLAWHUB_REGISTRY", "https://clawhub.ai"),
-        "SKILLHUB_TOKEN": get("SKILLHUB_TOKEN"),
-        "SKILLHUB_REGISTRY": get("SKILLHUB_REGISTRY", "https://skill.xfyun.cn"),
-        "SKILLHUB_NAMESPACE": get("SKILLHUB_NAMESPACE"),
-        "MODELSCOPE_API_KEY": get("MODELSCOPE_API_KEY") or get("MODELSCOPE_API_TOKEN"),
-        "MODELSCOPE_ENDPOINT": get("MODELSCOPE_ENDPOINT", "https://modelscope.cn"),
-        "MODELSCOPE_OWNER": get("MODELSCOPE_OWNER"),
-        "MODELSCOPE_SKILL_NAME": get("MODELSCOPE_SKILL_NAME", DEFAULT_SLUG),
-    }
+        raw = json.loads(path.read_text(encoding="utf-8-sig"))
+    except OSError as exc:
+        raise SystemExit(f"missing publish config: {path}\nSee {PUBLISH_DIR / 'README.md'}") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"invalid JSON in {path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise SystemExit(f"{path} must be a JSON object")
+    return {str(key): str(value) for key, value in raw.items()}
 
 
-def require(values: dict[str, str], names: list[str]) -> None:
-    missing = [name for name in names if not values.get(name)]
+def config_value(
+    config: dict[str, str],
+    key: str,
+    env_names: list[str] | None = None,
+    default: str = "",
+) -> str:
+    for env_name in env_names or []:
+        value = os.environ.get(env_name, "").strip()
+        if value and not is_placeholder(value):
+            return value
+    value = str(config.get(key, "")).strip()
+    if value and not is_placeholder(value):
+        return value
+    return default
+
+
+def require(config: dict[str, str], platform: str, keys: list[str]) -> None:
+    missing = [key for key in keys if not config_value(config, key)]
     if missing:
         raise SystemExit(
-            "Missing credential/config: "
-            + ", ".join(missing)
-            + "\nFill them in ~/.secrets/secrets.json or export them in the shell."
+            f"Missing {platform} config: " + ", ".join(missing)
+            + f"\nFill {PUBLISH_DIR / (platform + '.json')}"
         )
 
 
@@ -170,7 +174,6 @@ def report(name: str, completed: subprocess.CompletedProcess[str], dry_run: bool
 
 def publish_clawhub(
     staging: Path,
-    values: dict[str, str],
     *,
     slug: str,
     name: str,
@@ -178,18 +181,19 @@ def publish_clawhub(
     changelog: str,
     dry_run: bool,
 ) -> bool:
+    config = load_platform_config("clawhub")
     if not dry_run:
-        require(values, ["CLAWHUB_TOKEN"])
+        require(config, "clawhub", ["token"])
+    token = config_value(config, "token", ["CLAWHUB_TOKEN"])
+    owner = config_value(config, "owner", ["CLAWHUB_OWNER"])
+    registry = config_value(config, "registry", ["CLAWHUB_REGISTRY"], "https://clawhub.ai")
     config_path: Path | None = None
     extra: dict[str, str] = {}
-    if values["CLAWHUB_TOKEN"]:
+    if token:
         handle = tempfile.NamedTemporaryFile(
             "w", suffix=".json", delete=False, encoding="utf-8"
         )
-        json.dump(
-            {"registry": values["CLAWHUB_REGISTRY"], "token": values["CLAWHUB_TOKEN"]},
-            handle,
-        )
+        json.dump({"registry": registry, "token": token}, handle)
         handle.write("\n")
         handle.close()
         config_path = Path(handle.name)
@@ -220,8 +224,8 @@ def publish_clawhub(
         "--source-commit",
         source_commit,
     ]
-    if values["CLAWHUB_OWNER"]:
-        args.extend(["--owner", values["CLAWHUB_OWNER"]])
+    if owner:
+        args.extend(["--owner", owner])
     if dry_run:
         args.append("--dry-run")
     try:
@@ -232,32 +236,69 @@ def publish_clawhub(
     return report("clawhub", completed, dry_run)
 
 
+def ensure_skillhub_cli(temp_dir: Path) -> Path:
+    """Download the skillhub.cn CLI kit and return skills_store_cli.py."""
+    override = os.environ.get("SKILLHUB_CLI", "").strip()
+    if override and Path(override).is_file():
+        return Path(override)
+    kit = temp_dir / "skillhub-kit.tar.gz"
+    urllib.request.urlretrieve(SKILLHUB_KIT_URL, kit)
+    target = temp_dir / "skillhub-cli"
+    target.mkdir(parents=True, exist_ok=True)
+    members = ("cli/skills_store_cli.py", "cli/skills_upgrade.py")
+    with tarfile.open(kit, "r:gz") as archive:
+        for member in archive.getmembers():
+            if member.name in members and member.isfile():
+                member.name = Path(member.name).name
+                try:
+                    archive.extract(member, target, filter="data")
+                except TypeError:
+                    archive.extract(member, target)
+    cli = target / "skills_store_cli.py"
+    if not cli.is_file():
+        raise SystemExit(f"skillhub.cn CLI kit did not contain {members[0]}")
+    return cli
+
+
 def publish_skillhub(
     staging: Path,
-    values: dict[str, str],
+    temp_dir: Path,
     *,
+    changelog: str,
     dry_run: bool,
 ) -> bool:
-    require(values, ["SKILLHUB_TOKEN", "SKILLHUB_NAMESPACE"])
-    env = node_env(
-        {
-            "SKILLHUB_TOKEN": values["SKILLHUB_TOKEN"],
-            "SKILLHUB_REGISTRY": values["SKILLHUB_REGISTRY"],
-        }
-    )
+    config = load_platform_config("skillhub")
+    host = config_value(config, "host", ["SKILLHUB_HOST"], "https://api.skillhub.cn")
+    token = config_value(config, "token", ["SKILLHUB_TOKEN"])
+    if not dry_run:
+        require(config, "skillhub", ["token"])
+    cli = ensure_skillhub_cli(temp_dir)
+    env = dict(os.environ)
+    env["SKILLHUB_SKIP_SELF_UPGRADE"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     args = [
-        "@astron-team/skillhub@latest",
+        sys.executable,
+        str(cli),
         "publish",
         str(staging),
-        "--namespace",
-        values["SKILLHUB_NAMESPACE"],
-        "--visibility",
-        "public",
+        "--host",
+        host,
+        "--changelog",
+        changelog,
         "--json",
     ]
+    if token:
+        args.extend(["--token", token])
     if dry_run:
         args.append("--dry-run")
-    completed = run_npx(args, env)
+    completed = subprocess.run(
+        args,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     return report("skillhub", completed, dry_run)
 
 
@@ -333,14 +374,15 @@ def http_upload_skill_zip(url: str, token: str, zip_path: Path) -> dict[str, Any
 
 def publish_modelscope(
     staging: Path,
-    values: dict[str, str],
     *,
     frontmatter: dict[str, str],
     dry_run: bool,
 ) -> bool:
-    endpoint = values["MODELSCOPE_ENDPOINT"].rstrip("/")
-    owner = values["MODELSCOPE_OWNER"]
-    skill_name = values["MODELSCOPE_SKILL_NAME"]
+    config = load_platform_config("modelscope")
+    endpoint = config_value(config, "endpoint", ["MODELSCOPE_ENDPOINT"], "https://modelscope.cn").rstrip("/")
+    owner = config_value(config, "owner", ["MODELSCOPE_OWNER"])
+    skill_name = config_value(config, "skill_name", ["MODELSCOPE_SKILL_NAME"], DEFAULT_SLUG)
+    token = config_value(config, "token", ["MODELSCOPE_API_KEY", "MODELSCOPE_API_TOKEN"])
     zip_path = build_modelscope_zip(staging, staging.parent / f"{skill_name}.zip")
     description = frontmatter.get("summary") or frontmatter.get("description") or ""
     payload = {
@@ -360,8 +402,9 @@ def publish_modelscope(
     if dry_run:
         print("[modelscope] validated package locally (no token needed for dry-run)")
         return True
-    require(values, ["MODELSCOPE_API_KEY", "MODELSCOPE_OWNER"])
-    token = values["MODELSCOPE_API_KEY"]
+    require(config, "modelscope", ["token"])
+    if not owner:
+        raise SystemExit(f"Missing modelscope config: owner. Fill {PUBLISH_DIR / 'modelscope.json'}")
     try:
         uploaded = http_upload_skill_zip(f"{endpoint}/openapi/v1/files/upload", token, zip_path)
         data = uploaded.get("data") if isinstance(uploaded, dict) else None
@@ -409,9 +452,9 @@ def main() -> int:
     parser.add_argument("--changelog", default=f"Release {frontmatter.get('version', '')}")
     args = parser.parse_args()
     platforms = args.platform or ["clawhub", "skillhub", "modelscope"]
-    values = load_values()
 
     temp_dir: Path | None = None
+    staging: Path
     if args.staging:
         staging = args.staging.resolve()
         if not (staging / "SKILL.md").is_file():
@@ -419,6 +462,7 @@ def main() -> int:
     else:
         temp_dir, staging = build_staging()
 
+    work_dir = temp_dir or Path(tempfile.mkdtemp(prefix="mikhay-publish-work-"))
     results: dict[str, bool] = {}
     try:
         for platform in platforms:
@@ -426,7 +470,6 @@ def main() -> int:
             if platform == "clawhub":
                 results["clawhub"] = publish_clawhub(
                     staging,
-                    values,
                     slug=args.slug,
                     name=args.name,
                     version=args.version,
@@ -434,17 +477,23 @@ def main() -> int:
                     dry_run=args.dry_run,
                 )
             elif platform == "skillhub":
-                results["skillhub"] = publish_skillhub(staging, values, dry_run=args.dry_run)
+                results["skillhub"] = publish_skillhub(
+                    staging,
+                    work_dir,
+                    changelog=args.changelog,
+                    dry_run=args.dry_run,
+                )
             else:
                 results["modelscope"] = publish_modelscope(
                     staging,
-                    values,
                     frontmatter=frontmatter,
                     dry_run=args.dry_run,
                 )
     finally:
         if temp_dir is not None:
             shutil.rmtree(temp_dir, ignore_errors=True)
+        elif work_dir.exists():
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     print("\n=== summary ===")
     for name, ok in results.items():
