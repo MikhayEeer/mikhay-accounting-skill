@@ -1,24 +1,64 @@
 # Accounts And Assets
 
-Use this file for account balances, liabilities, installment plans, and repayment reminders.
+Accounts are the user's own data, not a fixed enum. The starter list below is a recommendation. Agents should define the accounts that actually exist for this user in `data/accounts.json`.
 
-## Account Types
+## Where Accounts Live
+
+Recommended path:
+
+```text
+data/accounts.json
+```
+
+Shape:
+
+```json
+{
+  "replace_defaults": false,
+  "accounts": [
+    {"账户": "招商银行", "别名": ["招行", "CMB"], "账户类型": "资产", "纳入": "included", "信用卡": false},
+    {"账户": "微信钱包", "别名": ["微信"], "账户类型": "资产"},
+    {"账户": "花呗", "别名": ["支付宝花呗"], "账户类型": "负债", "信用卡": true},
+    {"账户": "公积金", "账户类型": "资产", "纳入": "excluded"}
+  ],
+  "account_aliases": {"零钱": "微信钱包"}
+}
+```
+
+- `replace_defaults: true` drops the starter accounts, so the file is the complete account list.
+- `别名` (or `aliases`) lets natural speech and third-party bills use nicknames: 微信, 建行, 招行, 花呗. Resolution is exact after trimming and case folding. A configured alias wins over a starter account with the same name, so an agent can rename a starter account without editing the scripts.
+- `账户类型` is `资产` or `负债`.
+- `纳入` is `included` or `excluded` (备查). `备查: true` also means excluded.
+- `信用卡: true` marks a liability account as a credit card for method B replay and card reports.
+- `account_aliases` is an optional alias-to-account map on top of per-account aliases.
+- The scripts find `data/accounts.json` next to the ledger file or in the working directory. Commands also accept `--accounts PATH`.
+- An unknown account is a **warning**, not an error. `validate_ledger.py --strict` promotes it to an error when a hard gate is wanted.
+
+`account_policy` inside a ledger or asset JSON still works for one file. It adds or overrides accounts the same way and is merged with the config file.
+
+## Starter Accounts
 
 Asset accounts:
 
-- `建设银行`
-- `工商银行`
-- `招商银行`
-- `微信钱包`
-- `支付宝`
-- `美团`
+- `建设银行` (alias 建行, CCB)
+- `工商银行` (alias 工行, ICBC)
+- `招商银行` (alias 招行, CMB)
+- `微信钱包` (alias 微信, WeChat)
+- `支付宝` (alias Alipay)
+- `美团` (alias 美团钱包)
 
 Liability accounts:
 
-- `白条`
-- `花呗`
+- `白条` (alias 京东白条)
+- `花呗` (alias 支付宝花呗)
 - `美团月付`
 - `抖音月付`
+
+These are placeholders, not requirements. If the user has 现金, a second bank card, a wallet on another platform, or a fund account, write it to `data/accounts.json` and use that name everywhere.
+
+## Account Types
+
+Each account is declared `资产` or `负债`. Only a `负债` account can appear in `credit_accounts`, `installment_plans`, or `repayment_reminders`.
 
 ## Asset Module Shape
 
@@ -47,14 +87,14 @@ Write target accounts in `note` or `备注`, for example `target_account=花呗`
 
 Each account is `included` or `excluded` (备查). Headline net worth uses included accounts only. The report prints excluded accounts in `备查账户`.
 
-Default excluded accounts:
+Starter excluded accounts:
 
 - `Apple Card` (负债)
 - `公积金` (资产)
 - `助学贷款` (负债)
 - `加密货币` (资产)
 
-Other accounts in the built-in list are included. Add or override accounts with `account_policy`, or set `纳入` on a snapshot.
+Any account can be excluded in `data/accounts.json` or with `account_policy`. Add or override accounts with `account_policy`, or set `纳入` on a snapshot.
 
 ## Credit-Card Snapshot Method
 
@@ -75,7 +115,7 @@ A single `credit_accounts` entry may set `mode` and override the file.
 
 ## Investment Accounts
 
-Add accounts such as `基金` or `证券` with `account_policy`. They are assets and included in net worth. The ledger stores net contributions. Floating profit is `snapshot market value - cumulative net contribution`, and it is printed only when a snapshot exists. There is no price feed and no built-in schedule.
+Add accounts such as `基金` or `证券` with `account_policy` or `data/accounts.json`. They are assets and included in net worth. The ledger stores net contributions. Floating profit is `snapshot market value - cumulative net contribution`, and it is printed only when a snapshot exists. There is no price feed and no built-in schedule.
 
 ## Forecast
 

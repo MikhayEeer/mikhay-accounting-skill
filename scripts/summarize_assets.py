@@ -19,6 +19,7 @@ from ledgerlib import (
     is_refund,
     last_working_day,
     load_file,
+    load_skill_config,
     merge_account_policy,
     money,
     normalize_include,
@@ -40,8 +41,12 @@ def latest_snapshots(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return latest
 
 
-def inclusion_map(data: dict[str, Any], snapshots: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
-    catalog, errors = merge_account_policy(data.get("account_policy") or [])
+def inclusion_map(
+    data: dict[str, Any],
+    snapshots: list[dict[str, Any]],
+    base_catalog: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    catalog, errors = merge_account_policy(data.get("account_policy") or [], base=base_catalog)
     if errors:
         raise SystemExit(errors[0])
     for row in sorted(snapshots, key=lambda item: str(item.get("时间", ""))):
@@ -182,12 +187,18 @@ def forecast(data: dict[str, Any], records: list[dict[str, Any]], as_of: date, c
     print(f"{cash_line} = {fmt(cash)}")
 
 
-def load_records(data: dict[str, Any], ledgers: list[Path]) -> list[dict[str, Any]]:
+def load_records(
+    data: dict[str, Any],
+    ledgers: list[Path],
+    config: Any = None,
+) -> list[dict[str, Any]]:
     records = [row for row in data.get("records", []) if isinstance(row, dict)]
     for path in ledgers:
         book, errors = load_file(path)
         if errors and not book.get("records"):
             raise SystemExit(f"{path}: {errors[0]}")
+        if config is not None:
+            config.apply_to_book(book)
         records.extend(row for row in book.get("records", []) if isinstance(row, dict))
     return records
 
@@ -200,8 +211,13 @@ def main() -> int:
     parser.add_argument("--cc-method", choices=["A", "B"], default="A", help="Credit-card snapshot method. Default: A.")
     parser.add_argument("--forecast", action="store_true", help="Project card statements and payday cash flow.")
     parser.add_argument("--items", type=Path, help="Optional items.json. Residual is listed and not added to any total.")
+    parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
+    parser.add_argument("--categories", type=Path, help="Category config. Default: data/categories.json when present.")
     args = parser.parse_args()
 
+    config = load_skill_config([args.file, *args.ledger], args.accounts, args.categories)
+    if config.errors:
+        raise SystemExit("\n".join(config.errors))
     book, errors = load_file(args.file)
     if errors and not book.get("is_ledger", True):
         raise SystemExit(errors[0])
@@ -218,10 +234,18 @@ def main() -> int:
     if args.as_of and cutoff is None:
         raise SystemExit("--as-of must be YYYY-MM-DD")
     as_of_date = cutoff.date() if cutoff else date.today()
-    records = load_records(data, args.ledger)
-    inferred = project(data, records, cutoff, cc_method=args.cc_method)
+    config.apply_to_book(data)
+    records = load_records(data, args.ledger, config)
+    inferred = project(
+        data,
+        records,
+        cutoff,
+        cc_method=args.cc_method,
+        catalog=config.catalog,
+        credit_cards=config.credit_cards,
+    )
     snapshots = latest_snapshots(data["asset_snapshots"])
-    catalog = inclusion_map(data, data["asset_snapshots"])
+    catalog = inclusion_map(data, data["asset_snapshots"], config.catalog)
     included = []
     excluded = []
     for row in inferred["账户余额"]:
@@ -251,7 +275,7 @@ def main() -> int:
     print(f"- 净资产: {fmt(included_assets - included_liabilities)}")
     print(f"- 备查净值: {fmt(excluded_assets - excluded_liabilities)}")
 
-    flows = accumulate(records, catalog)
+    flows = accumulate(records, catalog, config.categories)
     if flows.invest_in or flows.invest_out or flows.invest_accounts:
         print("\n## 投资")
         print(f"- 投资净投入: {fmt(flows.investment_net)}")

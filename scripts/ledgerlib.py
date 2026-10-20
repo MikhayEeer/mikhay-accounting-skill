@@ -31,41 +31,63 @@ REIMBURSE_STATUSES = {"待报销", "已报销", "不报销"}
 CREDIT_MODES = {"debt_only", "with_limit"}
 INVEST_OUT_SUBCATEGORY = "赎回"
 
-INCLUDED_ASSETS = {"建设银行", "工商银行", "招商银行", "微信钱包", "支付宝", "美团"}
-INCLUDED_LIABILITIES = {"白条", "花呗", "美团月付", "抖音月付"}
-CREDIT_CARDS = {"白条", "花呗", "美团月付", "抖音月付", "Apple Card"}
-# 备查 accounts stay out of headline net worth unless a policy overrides them.
-EXCLUDED_ACCOUNTS = {
-    "Apple Card": "负债",
-    "公积金": "资产",
-    "助学贷款": "负债",
-    "加密货币": "资产",
+# Starter account catalog. Accounts, aliases, inclusion flags, and credit-card
+# status are all editable in data/accounts.json; nothing here is a fixed enum.
+DEFAULT_ACCOUNTS: dict[str, dict[str, Any]] = {
+    "建设银行": {"kind": "资产", "include": "included", "credit": False, "aliases": ["建行", "CCB"]},
+    "工商银行": {"kind": "资产", "include": "included", "credit": False, "aliases": ["工行", "ICBC"]},
+    "招商银行": {"kind": "资产", "include": "included", "credit": False, "aliases": ["招行", "CMB"]},
+    "微信钱包": {"kind": "资产", "include": "included", "credit": False, "aliases": ["微信", "WeChat", "wechat"]},
+    "支付宝": {"kind": "资产", "include": "included", "credit": False, "aliases": ["Alipay", "alipay"]},
+    "美团": {"kind": "资产", "include": "included", "credit": False, "aliases": ["美团钱包"]},
+    "白条": {"kind": "负债", "include": "included", "credit": True, "aliases": ["京东白条"]},
+    "花呗": {"kind": "负债", "include": "included", "credit": True, "aliases": ["支付宝花呗"]},
+    "美团月付": {"kind": "负债", "include": "included", "credit": True, "aliases": []},
+    "抖音月付": {"kind": "负债", "include": "included", "credit": True, "aliases": []},
+    "Apple Card": {"kind": "负债", "include": "excluded", "credit": True, "aliases": ["AppleCard"]},
+    "公积金": {"kind": "资产", "include": "excluded", "credit": False, "aliases": []},
+    "助学贷款": {"kind": "负债", "include": "excluded", "credit": False, "aliases": []},
+    "加密货币": {"kind": "资产", "include": "excluded", "credit": False, "aliases": ["数字货币", "crypto"]},
 }
 
-CATEGORY_MAP = {
-    "食品餐饮": {"早餐", "午餐", "晚餐", "正餐", "外卖", "快餐", "小吃", "夜宵", "零食", "休闲零食", "水果", "生鲜", "饮料", "饮料酒水", "聚餐", "请客吃饭"},
-    "出行交通": {"打车", "公交地铁", "加油", "充电", "火车", "飞机", "租车", "停车费", "高速费", "通行费", "酒店住宿", "景区门票", "维修"},
-    "购物消费": {"服饰运动", "数码", "手机数码", "日常家居", "家居用品", "日用百货", "礼品", "纪念品", "祭祀用品", "虚拟充值", "外汇", "交通工具", "邮寄"},
-    "服饰美容": {"服装"},
-    "居家生活": {"住宿", "水费", "洗护", "政务", "邮寄", "电费"},
-    "生活服务": {"超市", "快递", "清洁用品", "燃气费"},
-    "医疗健康": {"挂号", "门诊", "检查费", "药品", "买药", "医院看病"},
-    "休闲娱乐": {"旅游度假", "棋牌桌游", "酒吧", "游戏", "游戏充值", "游戏购买", "KTV"},
-    "收入": {"工资", "报销", "补贴", "其他"},
-    "还款": {"白条还款", "月付还款"},
-    "转账": {"个人转账"},
+CREDIT_CARDS = {name for name, meta in DEFAULT_ACCOUNTS.items() if meta["credit"]}
+
+# Starter category catalog. It is a recommendation, not a gate: agents extend or
+# replace it in data/categories.json, and unknown values only warn by default.
+DEFAULT_CATEGORY_MAP: dict[str, set[str]] = {
+    "食品餐饮": {"早餐", "午餐", "晚餐", "正餐", "外卖", "买菜", "生鲜", "水果", "零食", "饮料", "饮料酒水", "咖啡", "聚餐", "其他"},
+    "出行交通": {"打车", "公交地铁", "加油", "停车费", "高速费", "火车", "飞机", "住宿", "维修", "其他"},
+    "购物消费": {"服饰运动", "数码", "日用百货", "礼品", "虚拟充值", "其他"},
+    "服饰美容": {"服装", "美容", "其他"},
+    "居家生活": {"水费", "电费", "燃气费", "宽带", "物业费", "家政", "其他"},
+    "生活服务": {"超市", "快递", "理发", "洗衣", "其他"},
+    "医疗健康": {"挂号", "门诊", "药品", "体检", "其他"},
+    "休闲娱乐": {"电影", "游戏", "旅游度假", "运动", "KTV", "其他"},
+    "教育学习": {"书籍", "课程", "考试", "文具", "其他"},
+    "人情往来": {"红包", "礼物", "聚会", "其他"},
+    "通讯网络": {"话费", "流量", "订阅", "其他"},
+    "收入": {"工资", "奖金", "补贴", "利息", "其他"},
+    "还款": {"信用卡还款", "贷款还款", "其他"},
+    "转账": {"个人转账", "其他"},
     "退款": {"退款", "其他"},
-    "报销": {"AI订阅", "差旅", "其他"},
-    "投资": {"定投", "证券入金", "赎回", "理财"},
+    "报销": {"差旅", "餐饮", "交通", "其他"},
+    "投资": {"买入", "赎回", "定投", "其他"},
 }
 
 CATEGORY_ALIASES = {"健康医疗": "医疗健康"}
-SUBCATEGORY_ALIASES = {"停车": "停车费", "高速费用": "高速费", "酒水饮料": "饮料酒水"}
+SUBCATEGORY_ALIASES = {
+    "停车": "停车费",
+    "高速费用": "高速费",
+    "酒水饮料": "饮料酒水",
+    "白条还款": "信用卡还款",
+    "月付还款": "信用卡还款",
+    "证券入金": "买入",
+}
 LEGACY_PAIR_ALIASES = {
     ("购物消费", "饮料酒水"): ("食品餐饮", "饮料酒水"),
 }
 
-SPEND_CATEGORIES = set(CATEGORY_MAP) - {"收入", "还款", "转账", "报销", "投资"}
+SPEND_CATEGORIES = set(DEFAULT_CATEGORY_MAP) - {"收入", "还款", "转账", "报销", "投资"}
 LEDGER_SUFFIXES = {".json", ".csv"}
 DECIMAL_RE = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?")
 CURRENCY_RE = re.compile(r"[A-Z]{3}")
@@ -76,19 +98,104 @@ CC_METHOD_A = "A（最近快照+快照后新增）"
 CC_METHOD_B = "B（账本从零重放）"
 
 
-def default_account_catalog() -> dict[str, dict[str, str]]:
-    catalog: dict[str, dict[str, str]] = {}
-    for name in INCLUDED_ASSETS:
-        catalog[name] = {"kind": "资产", "include": "included"}
-    for name in INCLUDED_LIABILITIES:
-        catalog[name] = {"kind": "负债", "include": "included"}
-    for name, kind in EXCLUDED_ACCOUNTS.items():
-        catalog[name] = {"kind": kind, "include": "excluded"}
-    return catalog
+def default_account_catalog() -> dict[str, dict[str, Any]]:
+    return {
+        name: {
+            "kind": meta["kind"],
+            "include": meta["include"],
+            "credit": bool(meta["credit"]),
+            "aliases": list(meta["aliases"]),
+        }
+        for name, meta in DEFAULT_ACCOUNTS.items()
+    }
 
 
 def known_accounts() -> set[str]:
     return set(default_account_catalog())
+
+
+def alias_key(value: Any) -> str:
+    return str(value if value is not None else "").strip().casefold()
+
+
+def account_alias_map(catalog: dict[str, dict[str, Any]] | None = None) -> dict[str, str]:
+    catalog = catalog if catalog is not None else default_account_catalog()
+    mapping: dict[str, str] = {}
+    for name, meta in catalog.items():
+        for alias in meta.get("aliases") or []:
+            key = alias_key(alias)
+            if key and key != alias_key(name):
+                mapping[key] = name
+    return mapping
+
+
+def resolve_account(
+    name: Any,
+    catalog: dict[str, dict[str, Any]] | None = None,
+    alias_map: dict[str, str] | None = None,
+) -> str:
+    """Resolve a raw account name, or one of its aliases, to a catalog account."""
+    text = str(name if name is not None else "").strip()
+    if not text:
+        return ""
+    catalog = catalog if catalog is not None else default_account_catalog()
+    key = alias_key(text)
+    if alias_map is None:
+        alias_map = account_alias_map(catalog)
+    # An explicitly configured alias wins over a starter account with the same name.
+    if key in alias_map:
+        return alias_map[key]
+    if text in catalog:
+        return text
+    for candidate in catalog:
+        if alias_key(candidate) == key:
+            return candidate
+    return text
+
+
+def apply_account_aliases(
+    book: dict[str, Any],
+    catalog: dict[str, dict[str, Any]] | None = None,
+    alias_map: dict[str, str] | None = None,
+) -> list[str]:
+    """Rewrite account names in place when their alias is configured."""
+    catalog = catalog if catalog is not None else default_account_catalog()
+    alias_map = alias_map if alias_map is not None else account_alias_map(catalog)
+    notes: list[str] = []
+
+    def fix(row: Any, field: str, label: str) -> None:
+        if not isinstance(row, dict):
+            return
+        raw = str(row.get(field, "") or "").strip()
+        if not raw:
+            return
+        resolved = resolve_account(raw, catalog, alias_map)
+        if resolved != raw:
+            row[field] = resolved
+            notes.append(f"{label}: 账户别名 {raw} -> {resolved}")
+
+    def fix_note_target(row: Any, label: str) -> None:
+        if not isinstance(row, dict):
+            return
+        for field in ("note", "备注"):
+            text = str(row.get(field, "") or "")
+            match = TARGET_RE.search(text)
+            if not match:
+                continue
+            raw = match.group(1)
+            resolved = resolve_account(raw, catalog, alias_map)
+            if resolved != raw:
+                row[field] = text[: match.start(1)] + resolved + text[match.end(1) :]
+                notes.append(f"{label}: 目标账户别名 {raw} -> {resolved}")
+
+    for index, row in enumerate(book.get("records") or [], 1):
+        fix(row, "账户", f"record[{index}]")
+        fix(row, "target_account", f"record[{index}]")
+        fix_note_target(row, f"record[{index}]")
+    for key in ("asset_snapshots", "credit_accounts", "installment_plans", "repayment_reminders", "account_policy"):
+        for index, row in enumerate(book.get(key) or [], 1):
+            fix(row, "账户", f"{key}[{index}]")
+    return notes
 
 
 def normalize_include(value: Any) -> str:
@@ -100,8 +207,20 @@ def normalize_include(value: Any) -> str:
     return ""
 
 
-def merge_account_policy(rows: Iterable[dict[str, Any]] | None) -> tuple[dict[str, dict[str, str]], list[str]]:
-    catalog = default_account_catalog()
+def merge_account_policy(
+    rows: Iterable[dict[str, Any]] | None,
+    base: dict[str, dict[str, Any]] | None = None,
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    source = base if base is not None else default_account_catalog()
+    catalog: dict[str, dict[str, Any]] = {
+        name: {
+            "kind": meta.get("kind", ""),
+            "include": meta.get("include", "included"),
+            "credit": bool(meta.get("credit", False)),
+            "aliases": list(meta.get("aliases") or []),
+        }
+        for name, meta in source.items()
+    }
     errors: list[str] = []
     for i, row in enumerate(rows or [], 1):
         prefix = f"account_policy[{i}]"
@@ -109,7 +228,7 @@ def merge_account_policy(rows: Iterable[dict[str, Any]] | None) -> tuple[dict[st
         if not name:
             errors.append(f"{prefix}: missing 账户")
             continue
-        current = catalog.get(name, {"kind": "", "include": "included"})
+        current = catalog.get(name, {"kind": "", "include": "included", "credit": False, "aliases": []})
         kind = str(row.get("账户类型", "")).strip() or current["kind"]
         if kind and kind not in ACCOUNT_KINDS:
             errors.append(f"{prefix}: 账户类型 must be 资产 or 负债")
@@ -119,8 +238,280 @@ def merge_account_policy(rows: Iterable[dict[str, Any]] | None) -> tuple[dict[st
         if row.get("纳入") not in (None, "") or row.get("include") not in (None, ""):
             if not include:
                 errors.append(f"{prefix}: 纳入 must be included or excluded")
-        catalog[name] = {"kind": kind or "资产", "include": include or current.get("include") or "included"}
+        credit = current.get("credit", False)
+        if "信用卡" in row or "credit" in row:
+            credit = truthy(row.get("信用卡", row.get("credit")))
+        catalog[name] = {
+            "kind": kind or "资产",
+            "include": include or current.get("include") or "included",
+            "credit": bool(credit),
+            "aliases": list(current.get("aliases") or []),
+        }
     return catalog, errors
+
+
+class CategoryCatalog:
+    """Category map plus aliases. The shipped defaults are a recommendation."""
+
+    def __init__(
+        self,
+        mapping: dict[str, Iterable[str]] | None = None,
+        category_aliases: dict[str, str] | None = None,
+        subcategory_aliases: dict[str, str] | None = None,
+    ) -> None:
+        base = mapping if mapping is not None else default_category_catalog()
+        self.map: dict[str, set[str]] = {str(name): {str(item) for item in subs} for name, subs in base.items()}
+        self.category_aliases = dict(CATEGORY_ALIASES)
+        self.category_aliases.update(category_aliases or {})
+        self.subcategory_aliases = dict(SUBCATEGORY_ALIASES)
+        self.subcategory_aliases.update(subcategory_aliases or {})
+
+    def normalize(self, category: str, subcategory: str) -> tuple[str, str, list[str]]:
+        warnings: list[str] = []
+        original = (category, subcategory)
+        if original in LEGACY_PAIR_ALIASES:
+            category, subcategory = LEGACY_PAIR_ALIASES[original]
+            warnings.append(f"legacy pair {original[0]}/{original[1]} -> {category}/{subcategory}")
+        if category in self.category_aliases:
+            warnings.append(f"category alias {category} -> {self.category_aliases[category]}")
+            category = self.category_aliases[category]
+        if subcategory in self.subcategory_aliases:
+            warnings.append(f"subcategory alias {subcategory} -> {self.subcategory_aliases[subcategory]}")
+            subcategory = self.subcategory_aliases[subcategory]
+        return category, subcategory, warnings
+
+    def accepts(self, category: str, subcategory: str) -> bool:
+        return category in self.map and subcategory in self.map[category]
+
+
+def default_category_catalog() -> dict[str, set[str]]:
+    return {name: set(subs) for name, subs in DEFAULT_CATEGORY_MAP.items()}
+
+
+DEFAULT_CATEGORIES = CategoryCatalog()
+
+
+ACCOUNTS_FILE = "accounts.json"
+CATEGORIES_FILE = "categories.json"
+
+
+def find_config_path(
+    name: str,
+    paths: Iterable[str | os.PathLike[str]] = (),
+    explicit: str | os.PathLike[str] | None = None,
+) -> Path | None:
+    """Find a config file next to the ledger, the working directory, or data/."""
+    if explicit is not None:
+        candidate = Path(explicit)
+        return candidate if candidate.is_file() else None
+    candidates: list[Path] = [Path.cwd() / name, Path.cwd() / "data" / name]
+    for raw in paths:
+        path = Path(raw)
+        base = path if path.is_dir() else path.parent
+        for parent in [base, *list(base.parents)[:6]]:
+            candidates.append(parent / name)
+            candidates.append(parent / "data" / name)
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            key = str(candidate.resolve())
+        except OSError:
+            key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def load_accounts_config(
+    path: Path | str | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, str], list[str]]:
+    """Load the starter catalog plus optional data/accounts.json overrides."""
+    catalog = default_account_catalog()
+    errors: list[str] = []
+    if path is None:
+        return catalog, account_alias_map(catalog), errors
+    config_path = Path(path)
+    if not config_path.is_file():
+        return catalog, account_alias_map(catalog), [f"accounts config not found: {config_path}"]
+    try:
+        data = loads_json(config_path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as exc:
+        return catalog, account_alias_map(catalog), [f"accounts: invalid JSON: {exc}"]
+    if not isinstance(data, dict):
+        return catalog, account_alias_map(catalog), ["accounts: config must be a JSON object"]
+    if truthy(data.get("replace_defaults")):
+        catalog = {}
+    rows = data.get("accounts", [])
+    if not isinstance(rows, list):
+        errors.append("accounts.accounts must be a list")
+        rows = []
+    for i, row in enumerate(rows, 1):
+        prefix = f"accounts[{i}]"
+        if not isinstance(row, dict):
+            errors.append(f"{prefix}: must be an object")
+            continue
+        name = str(row.get("账户", row.get("name", ""))).strip()
+        if not name:
+            errors.append(f"{prefix}: missing 账户")
+            continue
+        current = catalog.get(
+            name, {"kind": "", "include": "included", "credit": False, "aliases": []}
+        )
+        kind = str(row.get("账户类型", row.get("kind", ""))).strip() or current.get("kind", "")
+        if kind and kind not in ACCOUNT_KINDS:
+            errors.append(f"{prefix}: 账户类型 must be 资产 or 负债")
+        include = normalize_include(row.get("纳入", row.get("include", "")))
+        if not include and "备查" in row:
+            include = "excluded" if truthy(row.get("备查")) else "included"
+        if row.get("纳入") not in (None, "") or row.get("include") not in (None, ""):
+            if not include:
+                errors.append(f"{prefix}: 纳入 must be included or excluded")
+        credit = bool(current.get("credit", False))
+        if "信用卡" in row or "credit" in row:
+            credit = truthy(row.get("信用卡", row.get("credit")))
+        aliases = list(current.get("aliases") or [])
+        raw_aliases = row.get("别名", row.get("aliases"))
+        if raw_aliases not in (None, ""):
+            if isinstance(raw_aliases, str):
+                aliases = [part for part in re.split(r"[;；,，\s]+", raw_aliases) if part]
+                aliases = [part.strip() for part in aliases if part.strip()]
+            elif isinstance(raw_aliases, list):
+                aliases = [str(part).strip() for part in raw_aliases if str(part).strip()]
+            else:
+                errors.append(f"{prefix}: 别名 must be a list or a string")
+        catalog[name] = {
+            "kind": kind or "资产",
+            "include": include or current.get("include") or "included",
+            "credit": credit,
+            "aliases": aliases,
+        }
+    alias_map = account_alias_map(catalog)
+    raw_map = data.get("account_aliases") or {}
+    if raw_map and not isinstance(raw_map, dict):
+        errors.append("account_aliases must be an object")
+    elif isinstance(raw_map, dict):
+        for alias, target in raw_map.items():
+            target_name = str(target or "").strip()
+            if not target_name:
+                errors.append(f"account_aliases[{alias}]: missing target account")
+            elif target_name not in catalog:
+                errors.append(f"account_aliases[{alias}]: unknown account {target_name}")
+            else:
+                alias_map[alias_key(alias)] = target_name
+    return catalog, alias_map, errors
+
+
+def load_categories_config(path: Path | str | None = None) -> tuple[CategoryCatalog, list[str]]:
+    """Load the starter category catalog plus optional data/categories.json overrides."""
+    if path is None:
+        return CategoryCatalog(), []
+    config_path = Path(path)
+    if not config_path.is_file():
+        return CategoryCatalog(), [f"categories config not found: {config_path}"]
+    try:
+        data = loads_json(config_path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as exc:
+        return CategoryCatalog(), [f"categories: invalid JSON: {exc}"]
+    if not isinstance(data, dict):
+        return CategoryCatalog(), ["categories: config must be a JSON object"]
+    errors: list[str] = []
+    mapping: dict[str, set[str]] = {} if truthy(data.get("replace_defaults")) else default_category_catalog()
+    rows = data.get("categories", {})
+    if rows and not isinstance(rows, dict):
+        errors.append("categories.categories must be an object")
+    elif isinstance(rows, dict):
+        for name, subs in rows.items():
+            if isinstance(subs, str):
+                subs = [part for part in re.split(r"[;；,，\s]+", subs) if part.strip()]
+            if not isinstance(subs, list) or not subs:
+                errors.append(f"categories[{name}]: must list subcategories")
+                continue
+            cleaned = [str(item).strip() for item in subs if str(item).strip()]
+            if not cleaned:
+                errors.append(f"categories[{name}]: must list subcategories")
+                continue
+            mapping[str(name).strip()] = set(cleaned)
+    raw_category_aliases = data.get("category_aliases") or {}
+    raw_subcategory_aliases = data.get("subcategory_aliases") or {}
+    for label, value in (
+        ("category_aliases", raw_category_aliases),
+        ("subcategory_aliases", raw_subcategory_aliases),
+    ):
+        if value and not isinstance(value, dict):
+            errors.append(f"categories.{label} must be an object")
+    category_aliases = {
+        str(key).strip(): str(value).strip()
+        for key, value in (raw_category_aliases.items() if isinstance(raw_category_aliases, dict) else [])
+        if str(key).strip() and str(value).strip()
+    }
+    subcategory_aliases = {
+        str(key).strip(): str(value).strip()
+        for key, value in (raw_subcategory_aliases.items() if isinstance(raw_subcategory_aliases, dict) else [])
+        if str(key).strip() and str(value).strip()
+    }
+    return CategoryCatalog(mapping, category_aliases, subcategory_aliases), errors
+
+
+class SkillConfig:
+    """Accounts, aliases, and categories for one ledger workspace."""
+
+    def __init__(
+        self,
+        catalog: dict[str, dict[str, Any]] | None = None,
+        alias_map: dict[str, str] | None = None,
+        categories: CategoryCatalog | None = None,
+        accounts_path: Path | None = None,
+        categories_path: Path | None = None,
+        errors: Iterable[str] | None = None,
+    ) -> None:
+        self.catalog = catalog if catalog is not None else default_account_catalog()
+        self.alias_map = alias_map if alias_map is not None else account_alias_map(self.catalog)
+        self.categories = categories if categories is not None else CategoryCatalog()
+        self.accounts_path = accounts_path
+        self.categories_path = categories_path
+        self.errors = list(errors or [])
+
+    @property
+    def credit_cards(self) -> set[str]:
+        return {name for name, meta in self.catalog.items() if meta.get("credit")}
+
+    def resolve_account(self, name: Any) -> str:
+        return resolve_account(name, self.catalog, self.alias_map)
+
+    def normalize_pair(self, category: str, subcategory: str) -> tuple[str, str, list[str]]:
+        return self.categories.normalize(category, subcategory)
+
+    def apply_to_book(self, book: dict[str, Any]) -> list[str]:
+        return apply_account_aliases(book, self.catalog, self.alias_map)
+
+
+def load_skill_config(
+    paths: Iterable[str | os.PathLike[str]] = (),
+    accounts_path: str | os.PathLike[str] | None = None,
+    categories_path: str | os.PathLike[str] | None = None,
+) -> SkillConfig:
+    errors: list[str] = []
+    accounts_file = find_config_path(ACCOUNTS_FILE, paths, accounts_path)
+    categories_file = find_config_path(CATEGORIES_FILE, paths, categories_path)
+    if accounts_path is not None and accounts_file is None:
+        errors.append(f"accounts config not found: {accounts_path}")
+    if categories_path is not None and categories_file is None:
+        errors.append(f"categories config not found: {categories_path}")
+    catalog, alias_map, account_errors = load_accounts_config(accounts_file)
+    categories, category_errors = load_categories_config(categories_file)
+    errors.extend(account_errors)
+    errors.extend(category_errors)
+    return SkillConfig(
+        catalog=catalog,
+        alias_map=alias_map,
+        categories=categories,
+        accounts_path=accounts_file,
+        categories_path=categories_file,
+        errors=errors,
+    )
 
 
 def truthy(value: Any) -> bool:
@@ -230,7 +621,7 @@ def load_file(path: Path) -> tuple[dict[str, Any], list[str]]:
         return book, errors
     if suffix == ".json":
         try:
-            data = loads_json(path.read_text(encoding="utf-8"))
+            data = loads_json(path.read_text(encoding="utf-8-sig"))
         except json.JSONDecodeError as exc:
             return book, [f"invalid JSON: {exc}"]
         if isinstance(data, list):
@@ -306,19 +697,13 @@ def default_max_date(today: date | None = None) -> date:
     return today + timedelta(days=366)
 
 
-def normalize_pair(category: str, subcategory: str) -> tuple[str, str, list[str]]:
-    warnings: list[str] = []
-    original = (category, subcategory)
-    if original in LEGACY_PAIR_ALIASES:
-        category, subcategory = LEGACY_PAIR_ALIASES[original]
-        warnings.append(f"legacy pair {original[0]}/{original[1]} -> {category}/{subcategory}")
-    if category in CATEGORY_ALIASES:
-        warnings.append(f"category alias {category} -> {CATEGORY_ALIASES[category]}")
-        category = CATEGORY_ALIASES[category]
-    if subcategory in SUBCATEGORY_ALIASES:
-        warnings.append(f"subcategory alias {subcategory} -> {SUBCATEGORY_ALIASES[subcategory]}")
-        subcategory = SUBCATEGORY_ALIASES[subcategory]
-    return category, subcategory, warnings
+def normalize_pair(
+    category: str,
+    subcategory: str,
+    categories: CategoryCatalog | None = None,
+) -> tuple[str, str, list[str]]:
+    catalog = categories if categories is not None else DEFAULT_CATEGORIES
+    return catalog.normalize(category, subcategory)
 
 
 def parse_tags(value: Any) -> list[str]:
@@ -462,7 +847,7 @@ def due_date_for_cycle(start: date, due_day: int, bill_day: int) -> date:
 
 
 def load_buckets(path: Path) -> list[tuple[str, set[str] | None]]:
-    data = loads_json(path.read_text(encoding="utf-8"))
+    data = loads_json(path.read_text(encoding="utf-8-sig"))
     mapping = data.get("buckets", data) if isinstance(data, dict) else None
     if not isinstance(mapping, dict):
         raise SystemExit(f"buckets config must be a JSON object: {path}")
@@ -543,19 +928,28 @@ class FlowTotals:
         return self.invest_in - self.invest_out
 
 
-def _category_of(row: dict[str, Any]) -> tuple[str, str]:
+def _category_of(
+    row: dict[str, Any],
+    categories: CategoryCatalog | None = None,
+) -> tuple[str, str]:
     category = str(row.get("类别", "")).strip() or "未分类"
     subcategory = str(row.get("子类", "")).strip() or "未分类"
-    category, subcategory, _ = normalize_pair(category, subcategory)
+    category, subcategory, _ = normalize_pair(category, subcategory, categories)
     return category, subcategory
 
 
-def _note_investment_leg(totals: FlowTotals, row: dict[str, Any], *, count_flow: bool) -> None:
+def _note_investment_leg(
+    totals: FlowTotals,
+    row: dict[str, Any],
+    *,
+    count_flow: bool,
+    categories: CategoryCatalog | None = None,
+) -> None:
     amount = money(row.get("金额"))
     account = str(row.get("账户", "")).strip()
     if account:
         totals.invest_by_account[account] += amount
-    _, subcategory = _category_of(row)
+    _, subcategory = _category_of(row, categories)
     if count_flow:
         magnitude = abs(amount)
         if subcategory == INVEST_OUT_SUBCATEGORY:
@@ -607,7 +1001,11 @@ def _collect_pending(totals: FlowTotals, rows: list[dict[str, Any]]) -> None:
         )
 
 
-def accumulate(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]] | None = None) -> FlowTotals:
+def accumulate(
+    rows: list[dict[str, Any]],
+    catalog: dict[str, dict[str, Any]] | None = None,
+    categories: CategoryCatalog | None = None,
+) -> FlowTotals:
     """花销 counts spending net of refunds and received reimbursements.
 
     待报销 stays inside 实际花销 until a 报销 row arrives. 投资 is neither
@@ -625,12 +1023,12 @@ def accumulate(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]] | 
         amount = money(row.get("金额"))
         magnitude = abs(amount)
         account = str(row.get("账户", "")).strip()
-        category, subcategory = _category_of(row)
+        category, subcategory = _category_of(row, categories)
         kind = catalog.get(account, {}).get("kind", "")
         if is_refund(row):
             target = by_id.get(str(row.get("refund_of", "")).strip())
             if target is not None:
-                category, subcategory = _category_of(target)
+                category, subcategory = _category_of(target, categories)
             totals.refunds += magnitude
             totals.by_category_refund[category] += magnitude
             totals.by_subcategory_refund[f"{category}/{subcategory}"] += magnitude
@@ -648,7 +1046,7 @@ def accumulate(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]] | 
         elif tx_type == "报销":
             target = by_id.get(reimburse_ref(row))
             if target is not None:
-                category, subcategory = _category_of(target)
+                category, subcategory = _category_of(target, categories)
                 totals.by_category_reimburse[category] += magnitude
                 totals.by_subcategory_reimburse[f"{category}/{subcategory}"] += magnitude
             totals.reimbursed += magnitude
@@ -669,7 +1067,7 @@ def accumulate(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]] | 
             if pid:
                 invest_legs[pid].append(row)
             else:
-                _note_investment_leg(totals, row, count_flow=True)
+                _note_investment_leg(totals, row, count_flow=True, categories=categories)
 
     for legs in pair_legs.values():
         outgoing = [abs(money(leg.get("金额"))) for leg in legs if money(leg.get("金额")) < 0]
@@ -680,9 +1078,9 @@ def accumulate(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]] | 
     for legs in invest_legs.values():
         if not legs:
             continue
-        _note_investment_leg(totals, legs[0], count_flow=True)
+        _note_investment_leg(totals, legs[0], count_flow=True, categories=categories)
         for leg in legs[1:]:
-            _note_investment_leg(totals, leg, count_flow=False)
+            _note_investment_leg(totals, leg, count_flow=False, categories=categories)
     _collect_pending(totals, rows)
     return totals
 

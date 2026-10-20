@@ -11,14 +11,15 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from ledgerlib import accumulate
+from ledgerlib import DEFAULT_ACCOUNTS, accumulate, load_skill_config
 
 
 REQUIRED_FIELDS = ["名称", "预计金额", "类型", "优先级", "状态"]
 PRIORITIES = {"P0", "P1", "P2", "P3"}
 STATUSES = {"想买", "观望", "计划购买", "已购买", "放弃"}
 ACTIVE_STATUSES = {"想买", "观望", "计划购买"}
-LIABILITY_ACCOUNTS = {"白条", "花呗", "美团月付", "抖音月付"}
+# Fallback only: configured account kinds win.
+LIABILITY_ACCOUNTS = {name for name, meta in DEFAULT_ACCOUNTS.items() if meta["kind"] == "负债"}
 NEED_TYPES = {"健康", "医疗", "工作", "学习", "必需", "维修"}
 
 
@@ -56,7 +57,7 @@ def parse_day(value: Any) -> date | None:
 
 
 def load_wishlist(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     if isinstance(data, list):
         return data, []
     if isinstance(data, dict):
@@ -67,16 +68,21 @@ def load_wishlist(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]
     raise SystemExit(f"Unsupported wishlist JSON shape: {path}")
 
 
-def load_ledger(path: Path) -> list[dict[str, Any]]:
+def load_ledger(path: Path, config: Any = None) -> list[dict[str, Any]]:
     if path.suffix.lower() == ".csv":
         with path.open("r", encoding="utf-8-sig", newline="") as f:
-            return list(csv.DictReader(f))
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        return data.get("records", data.get("transactions", []))
-    raise SystemExit(f"Unsupported ledger file: {path}")
+            rows = list(csv.DictReader(f))
+    else:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        if isinstance(data, list):
+            rows = data
+        elif isinstance(data, dict):
+            rows = data.get("records", data.get("transactions", []))
+        else:
+            raise SystemExit(f"Unsupported ledger file: {path}")
+    if config is not None:
+        config.apply_to_book({"records": rows})
+    return rows
 
 
 def validate_items(items: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
@@ -157,30 +163,37 @@ def validate_buckets(buckets: list[dict[str, Any]], items: list[dict[str, Any]])
     return errors, warnings
 
 
-def ledger_context(paths: list[Path]) -> tuple[Decimal | None, Decimal, Decimal, Decimal, list[dict[str, Any]]]:
+def ledger_context(
+    paths: list[Path],
+    config: Any = None,
+) -> tuple[Decimal | None, Decimal, Decimal, Decimal, list[dict[str, Any]]]:
     rows: list[dict[str, Any]] = []
     if not paths:
         return None, Decimal("0"), Decimal("0"), Decimal("0"), rows
     for path in paths:
-        rows.extend(load_ledger(path))
-    flows = accumulate(rows)
+        rows.extend(load_ledger(path, config))
+    flows = accumulate(rows, config.catalog if config is not None else None, config.categories if config is not None else None)
     expense = flows.expense_net
     surplus = flows.income - expense - flows.repayment - flows.investment_net
     return surplus, flows.income, expense, flows.repayment, rows
 
 
-def asset_context(path: Path | None) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
+def asset_context(path: Path | None, config: Any = None) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
     if path is None:
         return None, None, None
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         return None, None, None
+    if config is not None:
+        config.apply_to_book(data)
     assets: dict[str, Decimal] = {}
     liabilities: dict[str, Decimal] = {}
     for row in data.get("asset_snapshots", []):
         account = str(row.get("账户", "")).strip()
         amount = money(row.get("金额"))
         kind = str(row.get("账户类型", "")).strip()
+        if not kind and config is not None:
+            kind = config.catalog.get(account, {}).get("kind", "")
         if kind == "负债" or account in LIABILITY_ACCOUNTS:
             liabilities[account] = abs(amount)
         else:
@@ -349,6 +362,8 @@ def main() -> int:
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument("--as-of", help="Date for the cooling-off clock, YYYY-MM-DD. Default: today.")
     parser.add_argument("--due", action="store_true", help="Print wishes whose cooling-off period has ended.")
+    parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
+    parser.add_argument("--categories", type=Path, help="Category config. Default: data/categories.json when present.")
     args = parser.parse_args()
     if args.as_of:
         as_of = parse_day(args.as_of)
@@ -357,6 +372,13 @@ def main() -> int:
     else:
         as_of = date.today()
 
+    config = load_skill_config(
+        [args.wishlist, *args.ledger] + ([args.assets] if args.assets else []),
+        args.accounts,
+        args.categories,
+    )
+    if config.errors:
+        raise SystemExit("\n".join(config.errors))
     items, buckets = load_wishlist(args.wishlist)
     errors, warnings = validate_items(items)
     bucket_errors, bucket_warnings = validate_buckets(buckets, items)
@@ -394,8 +416,8 @@ def main() -> int:
     if args.validate_only:
         return 0
 
-    surplus, income, expense, repayment, records = ledger_context(args.ledger)
-    net_assets, asset_total, liability_total = asset_context(args.assets)
+    surplus, income, expense, repayment, records = ledger_context(args.ledger, config)
+    net_assets, asset_total, liability_total = asset_context(args.assets, config)
 
     print("\n## 财务上下文")
     print(f"- 月现金流结余: {fmt(surplus)}")

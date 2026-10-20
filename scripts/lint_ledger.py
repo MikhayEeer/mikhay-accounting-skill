@@ -18,10 +18,12 @@ from pathlib import Path
 from typing import Any
 
 from ledgerlib import (
+    CategoryCatalog,
     decimal_value,
     default_account_catalog,
     iter_ledger_files,
     load_file,
+    load_skill_config,
     merge_account_policy,
     money,
     parse_time,
@@ -37,7 +39,7 @@ def _blank(value: Any) -> bool:
 
 
 def _load_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def _as_list(data: Any, key: str) -> list[dict[str, Any]]:
@@ -416,6 +418,8 @@ def main() -> int:
     parser.add_argument("--recurring", type=Path, help="Fixed expenses. Default: data/recurring.json when that file exists.")
     parser.add_argument("--items", type=Path, help="Subscriptions file. Default: data/items/items.json when that file exists.")
     parser.add_argument("--as-of", help="Age pending reimbursements and fixed expenses as of YYYY-MM-DD. Default: today.")
+    parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
+    parser.add_argument("--categories", type=Path, help="Category config. Default: data/categories.json when present.")
     args = parser.parse_args()
     if args.as_of:
         parsed = parse_time(args.as_of)
@@ -438,25 +442,34 @@ def main() -> int:
     files = collect_files(args.paths)
     if not files:
         raise SystemExit("no ledger files found")
+    config = load_skill_config(args.paths, args.accounts, args.categories)
     rows: list[dict[str, Any]] = []
-    errors: list[str] = []
-    catalog: dict[str, dict[str, str]] = {}
+    errors: list[str] = list(config.errors)
+    catalog: dict[str, dict[str, Any]] = {}
     for path in files:
         book, load_errors = load_file(path)
         if not book.get("is_ledger", True):
             continue
         if load_errors:
             errors.extend(f"{path}: {item}" for item in load_errors)
-        merged, policy_errors = merge_account_policy(book.get("account_policy") or [])
+        config.apply_to_book(book)
+        merged, policy_errors = merge_account_policy(book.get("account_policy") or [], base=config.catalog)
         catalog.update(merged)
         errors.extend(policy_errors)
         rows.extend(row for row in book.get("records") or [] if isinstance(row, dict))
     if not catalog:
         catalog = default_account_catalog()
 
+    categories: CategoryCatalog = config.categories
     aliases, alias_load_warnings = load_aliases(aliases_path)
     specs, fixed_load_warnings = load_fixed(recurring_path, items_path)
-    _, validate_warnings = validate_records(rows, max_date=as_of + timedelta(days=366), strict_refs=len(files) > 1, catalog=catalog)
+    _, validate_warnings = validate_records(
+        rows,
+        max_date=as_of + timedelta(days=366),
+        strict_refs=len(files) > 1,
+        catalog=catalog,
+        categories=categories,
+    )
     missing, hits = missing_fixed(rows, specs, as_of)
     warnings = [
         *alias_load_warnings,

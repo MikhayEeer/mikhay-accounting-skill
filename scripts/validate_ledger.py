@@ -13,16 +13,13 @@ from typing import Any
 from ledgerlib import (
     ACCEPTED_SCHEMA_VERSIONS,
     ACCOUNT_KINDS,
-    CATEGORY_ALIASES,
-    CATEGORY_MAP,
     CREDIT_MODES,
     CURRENCY_RE,
     INVEST_OUT_SUBCATEGORY,
-    LEGACY_PAIR_ALIASES,
     REIMBURSE_STATUSES,
     SCHEMA_VERSION,
-    SUBCATEGORY_ALIASES,
     TYPES,
+    CategoryCatalog,
     check_tag,
     credit_mode,
     currency_of,
@@ -30,8 +27,8 @@ from ledgerlib import (
     default_max_date,
     is_refund,
     iter_ledger_files,
-    known_accounts,
     load_file,
+    load_skill_config,
     merge_account_policy,
     normalize_include,
     normalize_pair,
@@ -40,14 +37,12 @@ from ledgerlib import (
     parse_time,
     record_id,
     reimburse_ref,
+    resolve_account,
     target_account,
 )
 
 
 REQUIRED_RECORD = ["时间", "收支类型", "金额", "类别", "子类", "账户", "备注"]
-ACCOUNTS = known_accounts()
-LIABILITY_ACCOUNTS = {name for name, meta in merge_account_policy([])[0].items() if meta["kind"] == "负债"}
-ASSET_ACCOUNTS = ACCOUNTS - LIABILITY_ACCOUNTS
 
 
 def is_datetime(value: Any) -> bool:
@@ -111,12 +106,23 @@ def validate_records(
     *,
     max_date: date | None = None,
     strict_refs: bool = False,
-    catalog: dict[str, dict[str, str]] | None = None,
+    catalog: dict[str, dict[str, Any]] | None = None,
+    categories: CategoryCatalog | None = None,
+    strict: bool = False,
 ) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     max_date = max_date or default_max_date()
-    catalog = catalog or merge_account_policy([])[0]
+    catalog = catalog if catalog is not None else merge_account_policy([])[0]
+    categories = categories if categories is not None else CategoryCatalog()
+
+    def issue(message: str) -> None:
+        """Custom catalogs are a warning by default; --strict turns them into errors."""
+        if strict:
+            errors.append(message)
+        else:
+            warnings.append(message)
+
     seen_ids: dict[str, int] = {}
     seen_rows: dict[tuple[Any, ...], int] = {}
     id_index: dict[str, dict[str, Any]] = {}
@@ -145,8 +151,6 @@ def validate_records(
             errors.append(f"{prefix}: invalid 收支类型 {tx_type!r}")
         if amount is None:
             errors.append(f"{prefix}: 金额 must be a decimal number")
-        elif amount == 0:
-            errors.append(f"{prefix}: 金额 cannot be zero")
         else:
             if amount != amount.quantize(Decimal("0.01")):
                 warnings.append(f"{prefix}: 金额 has more than 2 decimal places")
@@ -165,33 +169,45 @@ def validate_records(
                     warnings.append(f"{prefix}: 投资投入 usually uses a negative 金额 on the cash account")
             elif tx_type == "转账" and amount < 0 and not pair_id(row):
                 warnings.append(f"{prefix}: legacy 转账 usually uses a positive 金额; pair legs may be signed")
-        if account not in catalog:
-            errors.append(f"{prefix}: invalid 账户 {account!r}")
-        if norm_category not in CATEGORY_MAP:
-            errors.append(f"{prefix}: invalid 类别 {category!r}")
-        elif norm_subcategory not in CATEGORY_MAP[norm_category]:
-            errors.append(f"{prefix}: invalid 子类 {subcategory!r} for 类别 {category!r}")
-        else:
-            if tx_type == "退款" or (is_refund(row) and tx_type != "支出"):
-                if norm_category in {"收入", "还款", "转账", "报销", "投资"}:
-                    errors.append(f"{prefix}: 退款 cannot use 类别 {norm_category}")
-            else:
-                expected_category = {
-                    "收入": "收入",
-                    "还款": "还款",
-                    "转账": "转账",
-                    "报销": "报销",
-                    "投资": "投资",
-                }.get(tx_type)
-                if expected_category and norm_category != expected_category:
-                    errors.append(f"{prefix}: 收支类型 {tx_type} should use 类别 {expected_category}")
-                if tx_type == "支出" and norm_category in {"收入", "还款", "转账", "退款", "报销", "投资"}:
-                    errors.append(f"{prefix}: 支出 cannot use 类别 {norm_category}")
-            if tx_type == "收入" and norm_subcategory == "报销":
-                warnings.append(
-                    f"{prefix}: 收入/报销 is a legacy shape and still counts as income; "
-                    "new records should use 收支类型=报销. Rewriting old rows is the user's decision"
+        resolved_account = resolve_account(account, catalog)
+        if resolved_account != account:
+            issue(f"{prefix}: 账户别名 {account} -> {resolved_account}")
+        if resolved_account not in catalog:
+            issue(
+                f"{prefix}: 账户 {account!r} 不在账户表。自定义账户写入 data/accounts.json，"
+                "或在账本 account_policy 里声明；默认只是推荐清单"
+            )
+        if not categories.accepts(norm_category, norm_subcategory):
+            if norm_category not in categories.map:
+                issue(
+                    f"{prefix}: 类别 {category!r} 不在类别表。自定义类别写入 data/categories.json；"
+                    "默认只是推荐清单，不是硬枚举"
                 )
+            else:
+                issue(
+                    f"{prefix}: 子类 {subcategory!r} 不在类别 {norm_category} 下。"
+                    "自定义子类写入 data/categories.json；默认只是推荐清单"
+                )
+        if tx_type == "退款" or (is_refund(row) and tx_type != "支出"):
+            if norm_category in {"收入", "还款", "转账", "报销", "投资"}:
+                issue(f"{prefix}: 退款 通常不使用 类别 {norm_category}")
+        else:
+            expected_category = {
+                "收入": "收入",
+                "还款": "还款",
+                "转账": "转账",
+                "报销": "报销",
+                "投资": "投资",
+            }.get(tx_type)
+            if expected_category and norm_category != expected_category:
+                issue(f"{prefix}: 收支类型 {tx_type} 通常使用 类别 {expected_category}")
+            if tx_type == "支出" and norm_category in {"收入", "还款", "转账", "退款", "报销", "投资"}:
+                issue(f"{prefix}: 支出 通常不使用 类别 {norm_category}")
+        if tx_type == "收入" and norm_subcategory == "报销":
+            warnings.append(
+                f"{prefix}: 收入/报销 is a legacy shape and still counts as income; "
+                "new records should use 收支类型=报销. Rewriting old rows is the user's decision"
+            )
         for tag in parse_tags(row.get("tags")):
             status, message = check_tag(tag)
             if status == "error":
@@ -200,8 +216,15 @@ def validate_records(
                 warnings.append(f"{prefix}: {message}")
         _check_currency(prefix, row, amount, errors)
         noted_target = target_account(row)
-        if noted_target and noted_target not in catalog:
-            errors.append(f"{prefix}: unknown target_account {noted_target!r}")
+        if noted_target:
+            resolved_target = resolve_account(noted_target, catalog)
+            if resolved_target != noted_target:
+                issue(f"{prefix}: target_account 别名 {noted_target} -> {resolved_target}")
+            elif resolved_target not in catalog:
+                issue(
+                    f"{prefix}: target_account {noted_target!r} 不在账户表。"
+                    "自定义账户写入 data/accounts.json，或在 account_policy 里声明"
+                )
         if tx_type == "转账" and not pair_id(row) and not noted_target:
             warnings.append(f"{prefix}: 转账 has neither pairid nor target_account")
         if tx_type == "投资" and not pair_id(row) and not noted_target:
@@ -258,8 +281,10 @@ def validate_records(
             continue
         if abs(left_amount) != abs(right_amount):
             errors.append(f"{label}: amounts are not equal ({left_amount} vs {right_amount})")
-        if left_amount * right_amount >= 0:
+        if left_amount * right_amount > 0:
             errors.append(f"{label}: legs must have opposite directions")
+        elif left_amount == 0 or right_amount == 0:
+            warnings.append(f"{label}: zero-amount leg; a transfer or investment leg is normally non-zero")
         if str(left.get("账户", "")).strip() == str(right.get("账户", "")).strip():
             errors.append(f"{label}: legs must use different accounts")
 
@@ -299,9 +324,22 @@ def validate_records(
     return errors, warnings
 
 
-def validate_assets(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]], max_date: date) -> tuple[list[str], list[str]]:
+def validate_assets(
+    rows: list[dict[str, Any]],
+    catalog: dict[str, dict[str, Any]],
+    max_date: date,
+    *,
+    strict: bool = False,
+) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
+
+    def issue(message: str) -> None:
+        if strict:
+            errors.append(message)
+        else:
+            warnings.append(message)
+
     for i, row in enumerate(rows, 1):
         prefix = f"asset_snapshot[{i}]"
         if not isinstance(row, dict):
@@ -314,8 +352,11 @@ def validate_assets(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str
             errors.append(f"{prefix}: missing 金额")
         _check_upper(prefix, row.get("时间"), max_date, errors)
         account = str(row.get("账户", "")).strip()
-        if account not in catalog:
-            errors.append(f"{prefix}: invalid 账户 {account!r}")
+        if resolve_account(account, catalog) not in catalog:
+            issue(
+                f"{prefix}: 账户 {account!r} 不在账户表。自定义账户写入 data/accounts.json，"
+                "或在 account_policy 里声明"
+            )
         kind = str(row.get("账户类型", "")).strip()
         if kind and kind not in ACCOUNT_KINDS:
             errors.append(f"{prefix}: 账户类型 must be 资产 or 负债")
@@ -345,12 +386,20 @@ def validate_day(value: Any) -> bool:
 
 def validate_credit_accounts(
     rows: list[dict[str, Any]],
-    catalog: dict[str, dict[str, str]],
+    catalog: dict[str, dict[str, Any]],
     *,
     default_mode: str = "debt_only",
+    strict: bool = False,
 ) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
+
+    def issue(message: str) -> None:
+        if strict:
+            errors.append(message)
+        else:
+            warnings.append(message)
+
     for i, row in enumerate(rows, 1):
         prefix = f"credit_account[{i}]"
         if not isinstance(row, dict):
@@ -360,9 +409,15 @@ def validate_credit_accounts(
             if _blank(row.get(field)):
                 errors.append(f"{prefix}: missing {field}")
         account = str(row.get("账户", "")).strip()
-        kind = catalog.get(account, {}).get("kind")
-        if account not in catalog or kind != "负债":
-            errors.append(f"{prefix}: 账户 must be a liability account")
+        resolved = resolve_account(account, catalog)
+        kind = catalog.get(resolved, {}).get("kind")
+        if resolved not in catalog:
+            issue(
+                f"{prefix}: 账户 {account!r} 不在账户表，无法确认是负债账户。"
+                "自定义账户写入 data/accounts.json，或在 account_policy 里声明"
+            )
+        elif kind != "负债":
+            issue(f"{prefix}: 账户 {resolved!r} 应为负债账户（当前 {kind or '未知'}）")
         debt = decimal_value(row.get("欠款"))
         if debt is None or debt < 0:
             errors.append(f"{prefix}: 欠款 must be a non-negative decimal")
@@ -393,9 +448,22 @@ def validate_credit_accounts(
     return errors, warnings
 
 
-def validate_installments(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]], max_date: date) -> tuple[list[str], list[str]]:
+def validate_installments(
+    rows: list[dict[str, Any]],
+    catalog: dict[str, dict[str, Any]],
+    max_date: date,
+    *,
+    strict: bool = False,
+) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
+
+    def issue(message: str) -> None:
+        if strict:
+            errors.append(message)
+        else:
+            warnings.append(message)
+
     required = ["id", "账户", "本金", "总期数", "已还期数", "每期金额", "下一还款日", "状态"]
     seen_ids: set[str] = set()
     for i, row in enumerate(rows, 1):
@@ -412,8 +480,11 @@ def validate_installments(rows: list[dict[str, Any]], catalog: dict[str, dict[st
                 errors.append(f"{prefix}: duplicate installment id {plan_id!r}")
             seen_ids.add(plan_id)
         account = str(row.get("账户", "")).strip()
-        if catalog.get(account, {}).get("kind") != "负债":
-            errors.append(f"{prefix}: 账户 must be a liability account")
+        resolved = resolve_account(account, catalog)
+        if resolved not in catalog:
+            issue(f"{prefix}: 账户 {account!r} 不在账户表；自定义账户写入 data/accounts.json")
+        elif catalog.get(resolved, {}).get("kind") != "负债":
+            issue(f"{prefix}: 账户 {resolved!r} 应为负债账户")
         for field in ["本金", "每期金额"]:
             value = decimal_value(row.get(field))
             if value is None or value <= 0:
@@ -434,9 +505,22 @@ def validate_installments(rows: list[dict[str, Any]], catalog: dict[str, dict[st
     return errors, warnings
 
 
-def validate_reminders(rows: list[dict[str, Any]], catalog: dict[str, dict[str, str]], max_date: date) -> tuple[list[str], list[str]]:
+def validate_reminders(
+    rows: list[dict[str, Any]],
+    catalog: dict[str, dict[str, Any]],
+    max_date: date,
+    *,
+    strict: bool = False,
+) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
+
+    def issue(message: str) -> None:
+        if strict:
+            errors.append(message)
+        else:
+            warnings.append(message)
+
     for i, row in enumerate(rows, 1):
         prefix = f"repayment_reminder[{i}]"
         if not isinstance(row, dict):
@@ -447,8 +531,11 @@ def validate_reminders(rows: list[dict[str, Any]], catalog: dict[str, dict[str, 
                 errors.append(f"{prefix}: missing {field}")
         _check_upper(prefix, row.get("时间"), max_date, errors)
         account = str(row.get("账户", "")).strip()
-        if catalog.get(account, {}).get("kind") != "负债":
-            errors.append(f"{prefix}: 账户 must be a liability account")
+        resolved = resolve_account(account, catalog)
+        if resolved not in catalog:
+            issue(f"{prefix}: 账户 {account!r} 不在账户表；自定义账户写入 data/accounts.json")
+        elif catalog.get(resolved, {}).get("kind") != "负债":
+            issue(f"{prefix}: 账户 {resolved!r} 应为负债账户")
         amount = decimal_value(row.get("金额"))
         if amount is None or amount <= 0:
             errors.append(f"{prefix}: 金额 must be a positive decimal")
@@ -460,6 +547,9 @@ def validate_book(
     *,
     max_date: date | None = None,
     strict_refs: bool = False,
+    catalog: dict[str, dict[str, Any]] | None = None,
+    categories: CategoryCatalog | None = None,
+    strict: bool = False,
 ) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -477,22 +567,33 @@ def validate_book(
             errors.append("credit_policy.mode must be debt_only or with_limit")
         elif mode:
             default_mode = mode
-    catalog, policy_errors = merge_account_policy(book.get("account_policy") or [])
+    base_catalog = catalog if catalog is not None else None
+    merged_catalog, policy_errors = merge_account_policy(book.get("account_policy") or [], base=base_catalog)
+    catalog = merged_catalog
     errors.extend(policy_errors)
     record_errors, record_warnings = validate_records(
         book.get("records") or [],
         max_date=max_date,
         strict_refs=strict_refs,
         catalog=catalog,
+        categories=categories,
+        strict=strict,
     )
-    asset_errors, asset_warnings = validate_assets(book.get("asset_snapshots") or [], catalog, max_date)
+    asset_errors, asset_warnings = validate_assets(
+        book.get("asset_snapshots") or [], catalog, max_date, strict=strict
+    )
     credit_errors, credit_warnings = validate_credit_accounts(
         book.get("credit_accounts") or [],
         catalog,
         default_mode=default_mode,
+        strict=strict,
     )
-    installment_errors, installment_warnings = validate_installments(book.get("installment_plans") or [], catalog, max_date)
-    reminder_errors, reminder_warnings = validate_reminders(book.get("repayment_reminders") or [], catalog, max_date)
+    installment_errors, installment_warnings = validate_installments(
+        book.get("installment_plans") or [], catalog, max_date, strict=strict
+    )
+    reminder_errors, reminder_warnings = validate_reminders(
+        book.get("repayment_reminders") or [], catalog, max_date, strict=strict
+    )
     errors.extend(record_errors)
     errors.extend(asset_errors)
     errors.extend(credit_errors)
@@ -520,6 +621,21 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Validate Chinese personal ledger CSV/JSON files.")
     parser.add_argument("paths", nargs="+", type=Path, help="Ledger files or directories. Directories are scanned fully.")
     parser.add_argument("--max-date", help="Upper bound for dates, YYYY-MM-DD. Default: today + 366 days.")
+    parser.add_argument(
+        "--accounts",
+        type=Path,
+        help="Account config. Default: data/accounts.json next to the ledger or in the working directory.",
+    )
+    parser.add_argument(
+        "--categories",
+        type=Path,
+        help="Category config. Default: data/categories.json next to the ledger or in the working directory.",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Treat custom accounts, custom categories, and type/category conflicts as errors. Default: warnings.",
+    )
     args = parser.parse_args()
     if args.max_date:
         parsed = parse_time(args.max_date)
@@ -529,11 +645,12 @@ def main() -> int:
     else:
         max_date = default_max_date()
 
+    config = load_skill_config(args.paths, args.accounts, args.categories)
     files = collect_paths(args.paths)
     if not files:
         raise SystemExit("no ledger files found")
-    combined_records: list[dict[str, Any]] = []
-    errors: list[str] = []
+
+    errors: list[str] = list(config.errors)
     warnings: list[str] = []
     books: list[tuple[Path, dict[str, Any]]] = []
     for path in files:
@@ -543,38 +660,60 @@ def main() -> int:
             continue
         if load_errors:
             errors.extend(f"{path}: {item}" for item in load_errors)
+        warnings.extend(f"{path}: {item}" for item in config.apply_to_book(book))
         books.append((path, book))
-        combined_records.extend(row for row in book["records"] if isinstance(row, dict))
 
-    strict_refs = len(books) > 1
+    combined_records = [row for _, book in books for row in book["records"] if isinstance(row, dict)]
+    if not books:
+        print("INVALID: no ledger files")
+        for error in errors:
+            print(f"- {error}")
+        return 1
+
     if len(books) == 1:
-        book_errors, book_warnings = validate_book(books[0][1], max_date=max_date, strict_refs=False)
+        book_errors, book_warnings = validate_book(
+            books[0][1],
+            max_date=max_date,
+            strict_refs=False,
+            catalog=config.catalog,
+            categories=config.categories,
+            strict=args.strict,
+        )
         errors.extend(book_errors)
         warnings.extend(book_warnings)
     else:
+        catalog = {name: dict(meta) for name, meta in config.catalog.items()}
         for path, book in books:
             partial = dict(book)
             partial["records"] = []
-            book_errors, book_warnings = validate_book(partial, max_date=max_date, strict_refs=False)
+            book_errors, book_warnings = validate_book(
+                partial,
+                max_date=max_date,
+                strict_refs=False,
+                catalog=catalog,
+                categories=config.categories,
+                strict=args.strict,
+            )
             errors.extend(f"{path}: {item}" for item in book_errors)
             warnings.extend(f"{path}: {item}" for item in book_warnings)
-        catalog: dict[str, dict[str, str]] = {}
-        for _, book in books:
-            merged, policy_errors = merge_account_policy(book.get("account_policy") or [])
-            catalog.update(merged)
-            errors.extend(policy_errors)
-        if not catalog:
-            catalog = merge_account_policy([])[0]
+            merged, _policy_errors = merge_account_policy(book.get("account_policy") or [], base=catalog)
+            catalog = merged
         record_errors, record_warnings = validate_records(
             combined_records,
             max_date=max_date,
-            strict_refs=strict_refs,
+            strict_refs=True,
             catalog=catalog,
+            categories=config.categories,
+            strict=args.strict,
         )
         errors.extend(record_errors)
         warnings.extend(record_warnings)
 
     label = files[0] if len(files) == 1 else f"{len(files)} files"
+    if config.accounts_path is not None:
+        warnings.append(f"accounts config: {config.accounts_path}")
+    if config.categories_path is not None:
+        warnings.append(f"categories config: {config.categories_path}")
     if errors:
         print(f"INVALID: {label}")
         for error in errors:

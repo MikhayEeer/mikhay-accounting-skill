@@ -8,7 +8,7 @@ Use these 9 fields. Extra fields documented below are optional, so older ledgers
 
 - `时间`: `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
 - `收支类型`: `支出`, `收入`, `还款`, `转账`, `退款`, `报销`, `投资`.
-- `金额`: signed number.
+- `金额`: signed number. `0` is valid, for example a fully refunded or fully reimbursed item that is kept as one row.
 - `类别`: top category.
 - `子类`: second-level category.
 - `账户`: one account enum.
@@ -36,14 +36,23 @@ A JSON list is also accepted and treated as records.
 
 Preferred storage path: `data/ledger/YYYY/YYYY-MM.json`.
 
+## Config Files
+
+Two optional side files make the skill fit a real user. Both are read by every script that needs them, next to the ledger or in the working directory, or through `--accounts PATH` / `--categories PATH`:
+
+- `data/accounts.json`: accounts, account `别名`, `账户类型`, `纳入`, and `信用卡`. Shape and rules are in `accounts.md`.
+- `data/categories.json`: custom categories, category aliases, and subcategory aliases. Shape and rules are in `categories.md`.
+
+`replace_defaults: true` in either file drops the starter list. Files may be UTF-8 with or without a BOM. Unknown accounts and unknown categories are warnings by default; `validate_ledger.py --strict` turns them into errors.
+
 ## Type Rules
 
 - `支出`: 真实消费。
 - `收入`: 真实收入。退款不是收入。
 - `还款`: 还负债；不混入普通支出统计。
 - `转账`: 账户间移动；不计入收入或支出。
-- `退款`: 冲回一笔支出。可以只写 `收支类型=退款`，也可以再写 `refund_of` 指向原支出的 `id`。报表同时给出毛额和净额，退款不计入收入。
-- `报销`: 报销到账。金额为正，不计入收入。可选 `reimburse_of` 指向原 `支出` 的 `id`，校验方式和 `refund_of` 相同。指到原支出时，金额冲回那个类别。
+- `退款`: 冲回一笔支出。首选做法是直接把原支出改小：全额退款改成 `0`，部分退款改成剩余金额，超过原支出的部分改成一条 `收入` 的差额。只有原记录无法改动时，才另写 `收支类型=退款`，可选 `refund_of` 指向原支出的 `id`。报表同时给出毛额和净额，退款不计入收入。
+- `报销`: 报销到账。首选做法同样是直接改原支出：全额报销改成 `0`，部分报销改成剩余金额，多出来的部分改成 `收入` 的差额；这样一件事只有一条记录。需要保留原始金额时再另写 `报销` 行，金额为正，不计入收入，可选 `reimburse_of` 指向原 `支出` 的 `id`，指到原支出时金额冲回那个类别。
 - `投资`: 现金和投资账户之间的移动。不进花销，不进收入。成对记录和转账一样，同一个 `pairid`，一正一负；只记得一边时写 `target_account=`。赎回方向相反。报表单列「投资净投入 = 投入 − 赎回」。
 
 ## Amount Sign Rules
@@ -55,36 +64,15 @@ Preferred storage path: `data/ledger/YYYY/YYYY-MM.json`.
 - `退款`: 正数，表示钱退回来。
 - `报销`: 正数，表示报销款回到原账户。
 - `投资`: 成对记录一正一负。单边投入在现金账户用负数，单边赎回在现金账户用正数。
-- 统计展示时，`支出`、`还款`、`转账` 使用正数合计。实际花销 = 支出毛额 − 退款 − 已报销。待报销的钱仍算在实际花销里，到账并写成 `报销` 之后才扣减。不另报「预计实际花销」。旧的 `收入/报销` 不改写，仍然算收入，校验只给警告。
+- `金额` 允许为 `0`，也允许 `支出` 为 `0` 后保持原类别。全额退款、全额报销或 AA 后净额为 0，都直接改原记录：金额改成 `0`，需要时把 `报销状态` 写成 `已报销`，不要新增第二条。
+- 净额超过原支出时（例如 500 元机票报销 520 元），把这一条改成 `收支类型=收入`、`金额=20`，备注保留来源。退款、报销和 AA 同理，一件事只留一条记录。
+- 统计展示时，`支出`、`还款`、`转账` 使用正数合计。实际花销 = 支出毛额 − 退款 − 已报销。待报销的钱仍算在实际花销里，到账并以任一种方式冲减之后才扣减。不另报「预计实际花销」。旧的 `收入/报销` 不改写，仍然算收入，校验只给警告。
 
-## Account Enums
+## Accounts
 
-Liability, included:
+Accounts are user data, not a closed enum. `data/accounts.json` defines the real accounts, their `别名`, `账户类型`, `纳入`, and `信用卡` flag. The starter list (建设银行, 工商银行, 招商银行, 微信钱包, 支付宝, 美团, 白条, 花呗, 美团月付, 抖音月付, plus 备查 examples Apple Card, 公积金, 助学贷款, 加密货币) only exists so a fresh install works out of the box. See `accounts.md` for the config shape and alias rules.
 
-- `白条`
-- `花呗`
-- `美团月付`
-- `抖音月付`
-
-Liability, excluded (备查) unless `account_policy` says otherwise:
-
-- `Apple Card`
-- `助学贷款`
-
-Asset, included:
-
-- `建设银行`
-- `工商银行`
-- `招商银行`
-- `微信钱包`
-- `支付宝`
-- `美团`
-
-Asset, excluded (备查) unless `account_policy` says otherwise:
-
-- `公积金`
-- `加密货币`
-
+Unknown accounts warn by default. A custom account can be declared in `data/accounts.json`, in `account_policy`, or on a snapshot with `账户类型`.
 ## Optional Asset Snapshot
 
 For account balance snapshots:
@@ -222,9 +210,7 @@ Default currency is `CNY`. Optional columns:
 
 ## Account Inclusion
 
-Accounts are `included` or `excluded` (备查). Excluded balances stay visible and stay out of headline net worth.
-
-Built-in excluded accounts: `Apple Card`, `公积金`, `助学贷款`, `加密货币`. Override them with `account_policy` or a snapshot field `纳入`.
+Accounts are `included` or `excluded` (备查). Excluded balances stay visible and stay out of headline net worth. Starter excluded accounts are `Apple Card`, `公积金`, `助学贷款`, and `加密货币`; change them in `data/accounts.json`, with `account_policy`, or with a snapshot field `纳入`.
 
 ```json
 {

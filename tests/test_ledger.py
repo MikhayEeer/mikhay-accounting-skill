@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import zipfile
@@ -18,11 +19,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(script: str, *args: str) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     return subprocess.run(
         [sys.executable, str(ROOT / "scripts" / script), *args],
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
         check=False,
     )
 
@@ -410,10 +415,18 @@ def test_extended_example_and_docs() -> None:
     assert "花销" in skill and "内部转账" in skill
     assert "花销" in readme and "内部转账" in readme
     assert "维修" in categories and "电费" in categories and "KTV" in categories
+    assert "data/categories.json" in categories and "replace_defaults" in categories
+    accounts_doc = (ROOT / "accounts.md").read_text(encoding="utf-8")
+    assert "data/accounts.json" in accounts_doc and "别名" in accounts_doc and "replace_defaults" in accounts_doc
+    schema_doc = (ROOT / "schema.md").read_text(encoding="utf-8")
+    assert "金额" in schema_doc and "0" in schema_doc
+    assert (ROOT / "examples" / "accounts.sample.json").is_file()
+    assert (ROOT / "examples" / "categories.sample.json").is_file()
+    assert (ROOT / "examples" / "workflow-zero-net.md").is_file()
     assert (ROOT / "CHANGELOG.md").exists()
     assert not (ROOT / "VERSION").exists()
     frontmatter = skill.split("---", 2)[1]
-    assert "version: 0.3.0" in frontmatter
+    assert "version: 0.4.0" in frontmatter
     assert 'displayName: "Mikhay 记账 - 资产管理/信用卡/预购清单/年月统计"' in frontmatter
     assert "homepage: https://github.com/MikhayEeer/mikhay-accounting-skill" in frontmatter
     assert "slug: mikhay-accounting-skill" in frontmatter
@@ -453,6 +466,9 @@ def test_package_omits_version_file_tests_and_github(tmp_path: Path) -> None:
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -466,7 +482,7 @@ def test_package_omits_version_file_tests_and_github(tmp_path: Path) -> None:
     assert any(name.endswith("examples/workflow-credit-repay.md") for name in names)
     assert any(name.endswith("README.zh-CN.md") for name in names)
     manifest = json.loads(archive.read("mikhay-accounting-skill/MANIFEST.json"))
-    assert manifest["version"] == "0.3.0"
+    assert manifest["version"] == "0.4.0"
 
 
 BILL_CSV = (

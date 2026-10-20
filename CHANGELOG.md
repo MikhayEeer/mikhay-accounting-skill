@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.4.0 - 2026-10-20
+
+Skill version is `0.4.0`. Ledger `schema_version` stays `0.3.0`: the record shape is backward compatible, and an unedited 0.2.0 or 0.3.0 book still validates with the same totals.
+
+### Added
+
+- `data/accounts.json`: user-defined accounts with `别名`, `账户类型`, `纳入`, and `信用卡`. `replace_defaults: true` replaces the starter list, and `account_aliases` adds a global alias map. Every script accepts `--accounts PATH`.
+- `data/categories.json`: custom categories, per-category subcategory lists, and `category_aliases` / `subcategory_aliases`. Every script accepts `--categories PATH`.
+- Account aliases resolve natural speech and bill exports (微信 → 微信钱包, 建行 → 建设银行). A configured alias wins over a starter account with the same name.
+- `金额=0` is valid. A fully refunded, fully reimbursed, or net-zero AA item stays one row; a partial net stays one negative row; an over-reimbursement becomes an `收入` row for the difference.
+- `validate_ledger.py --strict` turns unknown accounts, unknown categories, and type/category conflicts into errors. Default behavior is a warning.
+- JSON config and ledger files may be UTF-8 with a BOM.
+
+### Changed
+
+- The starter category list is generic. Personal categories such as 祭祀用品, 棋牌桌游, 白条还款, 月付还款, and AI订阅 are no longer shipped; add them in `data/categories.json` when they fit the current user.
+- Unknown account and category values are warnings instead of errors. `credit_accounts`, installment plans, and reminders only warn when the account is unknown instead of forcing a built-in liability name.
+- Starter accounts now carry aliases; 还款 defaults to `信用卡还款` instead of product-specific names.
+- `schema.md`, `categories.md`, `accounts.md`, `storage.md`, both READMEs, `SKILL.md`, `references/faq.md`, and `references/troubleshooting.md` document the config files and in-place netting.
+- Added `examples/accounts.sample.json`, `examples/categories.sample.json`, and `examples/workflow-zero-net.md`.
+
+### Compatibility
+
+- Old ledgers keep their totals. `收入/报销`, separate `退款` / `报销` rows, and unedited 0.2.0 books still validate.
+- Reimbursement rows remain supported; in-place netting is now the preferred shape. Whether to rewrite historical rows stays the user's decision.
+
 ## 0.3.0 - 2026-10-19
 
 Ledger `schema_version` is `0.3.0`. Skill version is `0.3.0`. `slug` stays `mikhay-accounting-skill`. `displayName` is unchanged. There is still no `VERSION` file.

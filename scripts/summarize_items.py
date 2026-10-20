@@ -24,7 +24,7 @@ HOLDING_STATUSES = {"持有", "已卖出", "已送出"}
 
 def load_items(path: Path) -> dict[str, Any]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         raise SystemExit(f"invalid JSON: {exc}") from exc
     if not isinstance(data, dict):

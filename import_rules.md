@@ -20,7 +20,8 @@ Use `scripts/import_ledger.py` to convert third-party CSV/XLSX bills into the st
 ## Import Policy
 
 - Preserve existing valid `类别/子类`.
-- Normalize known aliases from `categories.md`.
+- Normalize known aliases from `data/categories.json` and the built-in legacy aliases (see `categories.md`).
+- Resolve `账户` through `data/accounts.json` aliases before the substring fallback, so 微信, 建行, 招行, and 花呗 land on the configured account names. Accounts and categories that are not configured still import; the validator only warns about them.
 - If no confident category is found, use `购物消费/日用百货` and append `待确认分类` to `note`.
 - Use signed amount rules from `schema.md`: `支出` is negative; `收入`, `还款`, `退款` are positive. Legacy single-sided `转账` is positive. `pairid` legs are opposite signs.
 - A source value of `退款` becomes `收支类型=退款`, not income.

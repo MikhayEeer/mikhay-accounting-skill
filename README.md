@@ -2,7 +2,7 @@
 
 # Mikhay Accounting Skill
 
-Skill version `0.3.0` (see `SKILL.md` frontmatter). Ledger `schema_version` is `0.3.0`. An unedited `0.2.0` book still validates, and its totals stay the same.
+Skill version `0.4.0` (see `SKILL.md` frontmatter). Ledger `schema_version` is still `0.3.0`, because the record format stayed compatible. An unedited `0.2.0` book still validates, and its totals stay the same.
 
 Install: `npx skills add MikhayEeer/mikhay-accounting-skill`
 
@@ -23,7 +23,7 @@ This skill is for Chinese personal ledgers. Records, asset snapshots, and wishli
 This is not another bookkeeping app. The books stay in local files, and the agent follows the scripts instead of a screen full of forms.
 
 1. **The only entrance is the conversation.** Text, a voice transcript, and screenshots all go to the agent you already use. Reading a screenshot depends on whether that model has vision (VL). This skill does not do OCR and does not add a separate screenshot-import entry. After the model reads the image, the agent files each row with the categories in `categories.md`.
-2. **Categories are inferred, not picked from a menu.** Use only the enums shipped with the skill. When unsure, put `待确认` in the note. After you correct a name, add it to `data/aliases.json` and use that next time.
+2. **Accounts and categories are the user's data.** The skill ships starter lists, but the agent should write the real accounts (with `别名`) to `data/accounts.json` and the real categories to `data/categories.json`. "微信", "建行", and "花呗" resolve to the canonical account names. An unknown account or category only warns; `validate_ledger.py --strict` makes it an error. When unsure, put `待确认` in the note and ask once, then persist the answer in the config file.
 3. **Validation is the safety net.** After every write, run `validate_ledger.py` and `lint_ledger.py` on the shards you touched. Copy totals from the script output. The model does not add the numbers. The skill cannot install a hook. If those commands did not run, do not say the row was recorded.
 4. **A budget is a question asked before the purchase.** There is no envelope spreadsheet. When you say you want to buy something, the agent checks the wishlist bucket, credit exposure, and the cooling-off period (`analyze_wishlist.py`).
 5. **Reminders and market values are scheduled tasks you set yourself.** The skill only stores the dates: repayment days, renewal days, the end of a cooling-off period, and a missing fixed expense. It does not poll prices and it does not run a timer. A periodic reminder or a fresh market snapshot belongs on a scheduled task of the host agent, so this skill does not spend tokens in a loop.
@@ -32,7 +32,7 @@ This is not another bookkeeping app. The books stay in local files, and the agen
 
 Rows already stored as `收入/报销` stay valid and still count as income. `scripts/migrate_0_3.py` only prints a preview and refuses `--apply`. Whether to rewrite those rows is your decision. Tell the agent that; do not rewrite them on your own.
 
-Money that is waiting to be reimbursed still counts as actual spending. When the cash arrives, add a `报销` row with `reimburse_of` and mark the original expense `已报销`. Actual spending goes down then. There is no "expected actual spending" line.
+Money that is waiting to be reimbursed still counts as actual spending. When the cash arrives, edit the original row instead of adding a second one: a fully reimbursed item becomes `金额=0`, a partial one keeps the remaining amount, and an over-reimbursement turns the row into `收入` for the difference. Mark `报销状态=已报销` when useful. Only when the original row cannot be edited should you add a separate `报销` row with `reimburse_of`. The same rule covers refunds and AA: one event, one row, and `0` is a valid amount. There is no "expected actual spending" line.
 
 Investment accounts are part of net worth. A market value exists only when you ask for a snapshot. Floating profit is printed from that snapshot and is not a forecast.
 
@@ -107,7 +107,29 @@ python scripts/summarize_assets.py data/assets/2026/2026-06.assets.json --foreca
 python scripts/project_assets.py data/assets/assets.json data/ledger/2026/2026-06.json
 ```
 
-Accounts are `included` or `excluded` (备查). Net worth is printed as 计入净资产 and 备查账户. Built-in 备查 examples: Apple Card, 公积金, 助学贷款, 加密货币.
+Accounts are `included` or `excluded` (备查). Net worth is printed as 计入净资产 and 备查账户. Starter 备查 examples: Apple Card, 公积金, 助学贷款, 加密货币; change them in `data/accounts.json`.
+
+## Accounts, categories, and aliases
+
+Accounts and categories are configuration, not code. Every script reads these files next to the ledger or in the working directory, and every command also accepts `--accounts PATH` / `--categories PATH`.
+
+```json
+{
+  "accounts": [
+    {"账户": "招商银行", "别名": ["招行", "CMB"], "账户类型": "资产"},
+    {"账户": "花呗", "别名": ["支付宝花呗"], "账户类型": "负债", "信用卡": true}
+  ]
+}
+```
+
+```json
+{
+  "categories": {"宠物": ["猫粮", "疫苗"]},
+  "subcategory_aliases": {"猫食": "猫粮"}
+}
+```
+
+`replace_defaults: true` drops the starter list, so the file is the complete definition. Validation only warns on values that are outside the configured catalogs; add `--strict` when a hard gate is wanted.
 
 Credit-card balances default to method A: latest snapshot plus records after that snapshot. Method B replays the card ledger from zero and ignores the snapshot. The report names the method.
 

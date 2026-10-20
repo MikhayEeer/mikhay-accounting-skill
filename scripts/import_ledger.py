@@ -16,15 +16,14 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
-from ledgerlib import SCHEMA_VERSION, shard_key
-from validate_ledger import (
-    ACCOUNTS,
-    CATEGORY_ALIASES,
-    CATEGORY_MAP,
-    LEGACY_PAIR_ALIASES,
-    SUBCATEGORY_ALIASES,
-    validate_records,
+from ledgerlib import (
+    SCHEMA_VERSION,
+    SkillConfig,
+    load_skill_config,
+    resolve_account,
+    shard_key,
 )
+from validate_ledger import validate_records
 
 
 FIELDS = [
@@ -104,7 +103,7 @@ KEYWORD_RULES = [
     ("生活服务", "超市", ["超市", "便利店"]),
     ("居家生活", "水费", ["水费"]),
     ("居家生活", "电费", ["电费"]),
-    ("居家生活", "住宿", ["住宿", "房租"]),
+    ("出行交通", "住宿", ["住宿", "房租", "酒店"]),
     ("出行交通", "维修", ["维修", "保养"]),
     ("休闲娱乐", "游戏", ["游戏"]),
     ("休闲娱乐", "KTV", ["KTV", "卡拉OK", "卡拉 OK"]),
@@ -182,7 +181,7 @@ def load_rows(path: Path) -> list[dict[str, Any]]:
     if suffix == ".xlsx":
         return read_xlsx(path)
     if suffix == ".json":
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         if isinstance(data, list):
             return data
         if isinstance(data, dict):
@@ -255,60 +254,75 @@ def normalize_type(raw_type: str, amount: Decimal | None, text: str) -> str:
     return "收入"
 
 
-def normalize_pair(category: str, subcategory: str) -> tuple[str, str]:
-    if (category, subcategory) in LEGACY_PAIR_ALIASES:
-        category, subcategory = LEGACY_PAIR_ALIASES[(category, subcategory)]
-    category = CATEGORY_ALIASES.get(category, category)
-    subcategory = SUBCATEGORY_ALIASES.get(subcategory, subcategory)
-    return category, subcategory
-
-
-def classify(row: dict[str, Any], tx_type: str, text: str, account: str) -> tuple[str, str, bool]:
+def classify(
+    row: dict[str, Any],
+    tx_type: str,
+    text: str,
+    account: str,
+    config: SkillConfig,
+) -> tuple[str, str, bool]:
     raw_category = get_value(row, "类别")
     raw_subcategory = get_value(row, "子类")
-    category, subcategory = normalize_pair(raw_category, raw_subcategory)
-    if category in CATEGORY_MAP and subcategory in CATEGORY_MAP[category]:
+    category, subcategory, _ = config.normalize_pair(raw_category, raw_subcategory)
+    if config.categories.accepts(category, subcategory):
         return category, subcategory, False
     if tx_type == "退款":
         lowered = text.lower()
         for category, subcategory, keywords in KEYWORD_RULES:
-            if category not in {"收入"} and any(keyword.lower() in lowered for keyword in keywords):
+            if category in {"收入"}:
+                continue
+            if not config.categories.accepts(category, subcategory):
+                continue
+            if any(keyword.lower() in lowered for keyword in keywords):
                 return category, subcategory, False
         return "退款", "退款", False
     if tx_type == "报销":
-        if category in CATEGORY_MAP and subcategory in CATEGORY_MAP.get(category, ()):
-            return category, subcategory, False
         return "报销", "其他", False
     if tx_type == "投资":
-        if category in CATEGORY_MAP and subcategory in CATEGORY_MAP.get(category, ()):
-            return category, subcategory, False
-        return "投资", "理财", False
+        return "投资", "其他", False
     if tx_type == "收入":
         for category, subcategory, keywords in KEYWORD_RULES:
             if category == "收入" and any(k.lower() in text.lower() for k in keywords):
                 return category, subcategory, False
         return "收入", "其他", raw_category != "收入"
     if tx_type == "还款":
-        return "还款", "白条还款" if account == "白条" else "月付还款", False
+        credit_account = config.catalog.get(account, {}).get("credit", False)
+        return "还款", "信用卡还款" if credit_account else "其他", False
     if tx_type == "转账":
         return "转账", "个人转账", False
     lowered = text.lower()
     for category, subcategory, keywords in KEYWORD_RULES:
-        if category != "收入" and any(k.lower() in lowered for k in keywords):
+        if category == "收入" or not config.categories.accepts(category, subcategory):
+            continue
+        if any(k.lower() in lowered for k in keywords):
             return category, subcategory, False
-    return "购物消费", "日用百货", True
+    return "购物消费", "其他", True
 
 
-def normalize_account(raw_account: str, source: str, fallback: str | None) -> str:
-    for account in ACCOUNTS:
-        if account in raw_account:
-            return account
+def normalize_account(raw_account: str, source: str, fallback: str | None, config: SkillConfig) -> str:
+    """Resolve an account through configured aliases, then by substring match."""
+    if raw_account:
+        resolved = config.resolve_account(raw_account)
+        if resolved in config.catalog:
+            return resolved
+        lowered = raw_account.casefold()
+        for account, meta in config.catalog.items():
+            if account.casefold() in lowered:
+                return account
+            for alias in meta.get("aliases") or []:
+                if str(alias).casefold() in lowered:
+                    return account
     if fallback:
-        return fallback
+        return config.resolve_account(fallback)
     return DEFAULT_ACCOUNT_BY_SOURCE.get(source, "支付宝")
 
 
-def normalize_record(row: dict[str, Any], source: str, fallback_account: str | None) -> dict[str, Any]:
+def normalize_record(
+    row: dict[str, Any],
+    source: str,
+    fallback_account: str | None,
+    config: SkillConfig,
+) -> dict[str, Any]:
     remark_parts = [get_value(row, "备注"), get_value(row, "note")]
     text = " ".join(part for part in remark_parts if part)
     raw_amount = get_value(row, "金额")
@@ -338,8 +352,8 @@ def normalize_record(row: dict[str, Any], source: str, fallback_account: str | N
         signed_amount = (original_amount * fx_rate).quantize(Decimal("0.01"))
     elif cny_amount is not None and currency != "CNY":
         signed_amount = -abs(cny_amount) if tx_type == "支出" else abs(cny_amount)
-    account = normalize_account(get_value(row, "账户"), source, fallback_account)
-    category, subcategory, pending = classify(row, tx_type, text, account)
+    account = normalize_account(get_value(row, "账户"), source, fallback_account, config)
+    category, subcategory, pending = classify(row, tx_type, text, account, config)
     note_parts = []
     existing_note = get_value(row, "note")
     if existing_note:
@@ -457,6 +471,8 @@ def main() -> int:
     parser.add_argument("--output", "-o", help="Output file or directory. Default: data/<month>.json or data/imported.json")
     parser.add_argument("--source", default="auto", choices=["auto", "standard", "alipay", "wechat", "meituan", "bank"])
     parser.add_argument("--account", help="Fallback account when the source file has no account column.")
+    parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
+    parser.add_argument("--categories", type=Path, help="Category config. Default: data/categories.json when present.")
     parser.add_argument("--month", help="Only import records whose 时间 starts with YYYY-MM.")
     parser.add_argument("--split-by-month", action="store_true", help="Write one JSON file per month.")
     parser.add_argument("--shard", choices=["day", "month"], help="Write one JSON file per day or month. Keys use the file basename.")
@@ -478,13 +494,25 @@ def main() -> int:
         args.shard = "month"
     if args.year_dirs and not args.shard:
         raise SystemExit("--year-dirs requires --split-by-month or --shard")
-    if args.account and args.account not in ACCOUNTS:
-        raise SystemExit(f"Invalid fallback account: {args.account}")
+    config = load_skill_config(
+        [args.input, args.output if args.output else Path("data")],
+        args.accounts,
+        args.categories,
+    )
+    if config.errors:
+        raise SystemExit("\n".join(config.errors))
+    if args.account:
+        resolved_account = config.resolve_account(args.account)
+        if resolved_account not in config.catalog:
+            raise SystemExit(
+                f"Invalid fallback account: {args.account}. Add it to data/accounts.json or pass a known account."
+            )
+        args.account = resolved_account
     rows = load_rows(args.input)
-    records = [normalize_record(row, args.source, args.account) for row in rows]
+    records = [normalize_record(row, args.source, args.account, config) for row in rows]
     if args.month:
         records = [record for record in records if str(record["时间"]).startswith(args.month)]
-    errors, warnings = validate_records(records)
+    errors, warnings = validate_records(records, catalog=config.catalog, categories=config.categories)
     if errors:
         print("INVALID IMPORT", file=sys.stderr)
         for error in errors[:50]:

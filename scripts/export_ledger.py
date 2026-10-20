@@ -38,7 +38,7 @@ FIELDS = [
 
 
 def load_records(path: Path) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     if isinstance(data, list):
         return "mixed", data, {}
     if isinstance(data, dict):

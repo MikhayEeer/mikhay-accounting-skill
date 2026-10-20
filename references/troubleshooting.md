@@ -16,7 +16,7 @@
 
 ## 格式错误
 
-现象：时间无法解析、`金额 must be a decimal number`、`金额 cannot be zero`、`currency must be a 3-letter code`、CSV 报 `duplicate column` 或列数不符。正数支出、超过两位小数、裸标签通常是警告而不是 `INVALID`。
+现象：时间无法解析、`金额 must be a decimal number`、`currency must be a 3-letter code`、CSV 报 `duplicate column` 或列数不符。`金额=0` 是合法记录。正数支出、超过两位小数、裸标签、未知账户或未知类别通常是警告而不是 `INVALID`。
 
 回复：指出文件、记录序号和错误值，并给出符合 `schema.md` 的改法。例如支出 `-35.00`、时间 `2026-06-01 12:10`。
 
@@ -26,7 +26,6 @@
 
 现象：进程退出码为 1，首行 `INVALID:`。常见原文：
 
-- `invalid 类别` / `invalid 子类`
 - `pairid … expected 2 legs, found 1`
 - `amounts are not equal` / `legs must have opposite directions`
 - `金额 … != original_amount * fx_rate`
@@ -36,6 +35,14 @@
 回复：原样引用第一条，必要时再引用其余几条。说明它违反哪条数据规则。不要在 `INVALID` 之后继续报花销或净资产。
 
 恢复：按 `faq.md` 改记录，然后对同一路径重新校验。目录里的成对转账或 `refund_of` 要一次传入整个目录，单文件里找不到另一条时，`refund_of` 只警告「does not match a record id in this file」。
+
+## 未知账户或类别（警告）
+
+现象：`OK:` 后面有 `账户 … 不在账户表` 或 `类别 … 不在类别表`，退出码仍是 0。加 `--strict` 才会变成 `INVALID`。
+
+回复：说明这只是配置缺失。把账户写进 `data/accounts.json`（`账户`、`别名`、`账户类型`），把类别写进 `data/categories.json`，再跑一次校验。
+
+恢复：两个文件都可以用 `--accounts PATH` / `--categories PATH` 指定；不指定时脚本找账本旁边或工作目录下的 `data/`。配置文件允许带 BOM。
 
 ## 找不到文件
 

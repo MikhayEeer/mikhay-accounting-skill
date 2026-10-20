@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ledgerlib import (
+    SkillConfig,
     accumulate,
     apply_buckets,
     category_net,
@@ -23,11 +24,15 @@ from ledgerlib import (
     iter_ledger_files,
     load_buckets,
     load_file,
+    load_skill_config,
     parse_time,
 )
 
 
-def collect_records(paths: list[Path]) -> tuple[list[dict[str, Any]], list[Path]]:
+def collect_records(
+    paths: list[Path],
+    config: SkillConfig | None = None,
+) -> tuple[list[dict[str, Any]], list[Path]]:
     records: list[dict[str, Any]] = []
     files: list[Path] = []
     for path in paths:
@@ -38,6 +43,8 @@ def collect_records(paths: list[Path]) -> tuple[list[dict[str, Any]], list[Path]
                 continue
             if errors:
                 raise SystemExit(f"{candidate}: {errors[0]}")
+            if config is not None:
+                config.apply_to_book(book)
             files.append(candidate)
             records.extend(row for row in book["records"] if isinstance(row, dict))
     return records, files
@@ -50,6 +57,8 @@ def main() -> int:
     parser.add_argument("--shard", choices=["day", "month"], help="Index scanned files by day or month basename.")
     parser.add_argument("--buckets", type=Path, help="Optional bucket map. Omit to skip bucket totals.")
     parser.add_argument("--as-of", help="Date used to age 待报销 rows, YYYY-MM-DD. Default: today.")
+    parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
+    parser.add_argument("--categories", type=Path, help="Category config. Default: data/categories.json when present.")
     args = parser.parse_args()
     if args.as_of:
         parsed_as_of = parse_time(args.as_of)
@@ -59,12 +68,15 @@ def main() -> int:
     else:
         as_of = date.today()
 
-    records, files = collect_records(args.paths)
+    config = load_skill_config(args.paths, args.accounts, args.categories)
+    if config.errors:
+        raise SystemExit("\n".join(config.errors))
+    records, files = collect_records(args.paths, config)
     if not files:
         raise SystemExit("no ledger files found")
     if args.month:
         records = [row for row in records if str(row.get("时间", "")).startswith(args.month)]
-    totals = accumulate(records)
+    totals = accumulate(records, config.catalog, config.categories)
     nets = category_net(totals)
     net_whole = sum(nets.values(), Decimal("0"))
 

@@ -19,11 +19,15 @@ from ledgerlib import (
     CC_METHOD_A,
     CC_METHOD_B,
     CREDIT_CARDS,
+    DEFAULT_ACCOUNTS,
     SCHEMA_VERSION,
+    SkillConfig,
+    apply_account_aliases,
     default_account_catalog,
     is_refund,
     json_money,
     load_file,
+    load_skill_config,
     money,
     pair_id,
     parse_time,
@@ -31,19 +35,22 @@ from ledgerlib import (
 )
 
 
-LIABILITY_ACCOUNTS = {"白条", "花呗", "美团月付", "抖音月付", "Apple Card", "助学贷款"}
+# Fallback only: configured account kinds win. These names come from the starter catalog.
+LIABILITY_ACCOUNTS = {name for name, meta in DEFAULT_ACCOUNTS.items() if meta["kind"] == "负债"}
 
 
 def load_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
-def load_records(paths: list[Path]) -> list[dict[str, Any]]:
+def load_records(paths: list[Path], config: SkillConfig | None = None) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for path in paths:
         book, errors = load_file(path)
         if errors and not book["records"]:
             raise SystemExit(errors[0])
+        if config is not None:
+            config.apply_to_book(book)
         records.extend(row for row in book["records"] if isinstance(row, dict))
     return records
 
@@ -83,6 +90,8 @@ def project(
     as_of: datetime | None,
     *,
     cc_method: str = "A",
+    catalog: dict[str, dict[str, Any]] | None = None,
+    credit_cards: set[str] | None = None,
 ) -> dict[str, Any]:
     latest: dict[str, dict[str, Any]] = {}
     latest_time: dict[str, datetime] = {}
@@ -95,14 +104,15 @@ def project(
             latest[account] = row
             latest_time[account] = stamp
 
-    catalog = default_account_catalog()
+    source = catalog if catalog is not None else default_account_catalog()
+    catalog = {name: dict(meta) for name, meta in source.items()}
     for row in asset_data.get("account_policy", []) or []:
         name = str(row.get("账户", "")).strip()
         if not name:
             continue
         kind = str(row.get("账户类型", "")).strip()
         if name not in catalog:
-            catalog[name] = {"kind": kind or "资产", "include": "included"}
+            catalog[name] = {"kind": kind or "资产", "include": "included", "credit": False, "aliases": []}
         elif kind:
             catalog[name]["kind"] = kind
 
@@ -115,7 +125,8 @@ def project(
 
     if cc_method.upper() == "B":
         declared = {str(row.get("账户", "")).strip() for row in asset_data.get("credit_accounts", [])}
-        card_names = {name for name in balances if name in CREDIT_CARDS or name in declared}
+        cards = credit_cards if credit_cards is not None else CREDIT_CARDS
+        card_names = {name for name in balances if name in cards or name in declared}
         card_names |= {name for name in declared if name}
         for name in card_names:
             balances[name] = Decimal("0")
@@ -204,14 +215,26 @@ def main() -> int:
     parser.add_argument("--as-of", help="Inference cutoff in ISO date or datetime format.")
     parser.add_argument("--cc-method", choices=["A", "B", "a", "b"], default="A", help="Credit-card snapshot method. Default: A.")
     parser.add_argument("--write", action="store_true", help="Replace inferred_snapshot in the asset file.")
+    parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
     args = parser.parse_args()
 
+    config = load_skill_config([args.assets, *args.ledger], args.accounts, None)
+    if config.errors:
+        raise SystemExit("\n".join(config.errors))
     asset_data = load_json(args.assets)
     if not isinstance(asset_data, dict):
         raise SystemExit("Assets file must be a JSON object")
+    config.apply_to_book(asset_data)
     records = list(asset_data.get("records", []))
-    records.extend(load_records(args.ledger))
-    inferred = project(asset_data, records, parse_cutoff(args.as_of), cc_method=args.cc_method.upper())
+    records.extend(load_records(args.ledger, config))
+    inferred = project(
+        asset_data,
+        records,
+        parse_cutoff(args.as_of),
+        cc_method=args.cc_method.upper(),
+        catalog=config.catalog,
+        credit_cards=config.credit_cards,
+    )
     if args.write:
         asset_data["inferred_snapshot"] = inferred
         asset_data.setdefault("schema_version", SCHEMA_VERSION)

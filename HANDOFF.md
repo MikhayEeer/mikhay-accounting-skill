@@ -1,12 +1,12 @@
 # Agent Handoff
 
-Use this folder as a self-contained accounting skill. Skill version `0.3.0` lives in `SKILL.md` frontmatter. Ledger `schema_version` is `0.3.0`; unedited `0.2.0` books still validate. Homepage: https://github.com/MikhayEeer/mikhay-accounting-skill. The ledger stays on the local machine and is not uploaded. This skill is for Chinese personal ledgers. `slug` stays `mikhay-accounting-skill`.
+Use this folder as a self-contained accounting skill. Skill version `0.4.0` lives in `SKILL.md` frontmatter. Ledger `schema_version` stays `0.3.0`; unedited `0.2.0` books still validate. Homepage: https://github.com/MikhayEeer/mikhay-accounting-skill. The ledger stays on the local machine and is not uploaded. This skill is for Chinese personal ledgers. `slug` stays `mikhay-accounting-skill`.
 
 ## Start
 
 1. Read `SKILL.md`. When a record looks wrong, read `references/faq.md`. When a command fails, read `references/troubleshooting.md`.
 2. Read `schema.md` before editing ledger data.
-3. Read `categories.md` before classifying records.
+3. Read `categories.md` and `accounts.md` before classifying records. Define the user's real accounts in `data/accounts.json` (with `别名`) and categories in `data/categories.json`.
 4. Read `storage.md` before locating or writing real ledger files.
 5. Import third-party bills when needed:
 
@@ -44,6 +44,8 @@ python scripts/analyze_wishlist.py <wishlist.json> --ledger <month-ledger.json> 
 python scripts/export_ledger.py <ledger.json> --output exports/ledger.csv
 ```
 
+Validation warns instead of failing on unknown accounts and categories; `--strict` turns those warnings into errors. Refunds, reimbursements, and AA are normally netted in place on the original row: a fully settled item becomes `金额=0`, a partial one keeps the remainder, and an over-settlement becomes an `收入` row for the difference.
+
 Direct asset edits should report the ledger-derived difference and ask before creating adjustment records.
 
 ## Data Safety
@@ -64,6 +66,8 @@ Preferred ledger shards:
 - `data/ledger/YYYY/YYYY-MM/YYYY-MM-DD.json`
 - `data/assets/YYYY/YYYY-MM.assets.json`
 - `data/wishlist/YYYY/wishlist.json`
+- `data/accounts.json`
+- `data/categories.json`
 
 ## Package
 

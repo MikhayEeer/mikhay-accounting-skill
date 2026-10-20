@@ -15,12 +15,15 @@ from pathlib import Path
 from typing import Any
 
 from ledgerlib import (
+    CategoryCatalog,
+    SkillConfig,
     fmt,
     fmt_pct,
     index_shard_files,
     is_refund,
     iter_ledger_files,
     load_file,
+    load_skill_config,
     money,
     normalize_pair,
     pair_id,
@@ -46,7 +49,10 @@ class TagRollup:
         return self.gross - self.refunds - self.reimbursed
 
 
-def collect(paths: list[Path]) -> tuple[list[dict[str, Any]], list[Path]]:
+def collect(
+    paths: list[Path],
+    config: SkillConfig | None = None,
+) -> tuple[list[dict[str, Any]], list[Path]]:
     records: list[dict[str, Any]] = []
     files: list[Path] = []
     for path in paths:
@@ -57,15 +63,17 @@ def collect(paths: list[Path]) -> tuple[list[dict[str, Any]], list[Path]]:
                 continue
             if errors:
                 raise SystemExit(f"{candidate}: {errors[0]}")
+            if config is not None:
+                config.apply_to_book(book)
             files.append(candidate)
             records.extend(row for row in book["records"] if isinstance(row, dict))
     return records, files
 
 
-def category_of(row: dict[str, Any]) -> str:
+def category_of(row: dict[str, Any], categories: CategoryCatalog | None = None) -> str:
     category = str(row.get("类别", "")).strip() or "未分类"
     subcategory = str(row.get("子类", "")).strip()
-    category, _, _ = normalize_pair(category, subcategory)
+    category, _, _ = normalize_pair(category, subcategory, categories)
     return category
 
 
@@ -73,7 +81,10 @@ def day_of(row: dict[str, Any]) -> str:
     return str(row.get("时间", ""))[:10]
 
 
-def rollup(records: list[dict[str, Any]]) -> dict[str, TagRollup]:
+def rollup(
+    records: list[dict[str, Any]],
+    categories: CategoryCatalog | None = None,
+) -> dict[str, TagRollup]:
     stats: dict[str, TagRollup] = defaultdict(TagRollup)
     by_id = {record_id(row): row for row in records if record_id(row)}
     pairs: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -88,7 +99,7 @@ def rollup(records: list[dict[str, Any]]) -> dict[str, TagRollup]:
         if is_refund(row):
             target = by_id.get(str(row.get("refund_of", "")).strip())
             tags = parse_tags(target.get("tags")) if target is not None and parse_tags(target.get("tags")) else parse_tags(row.get("tags"))
-            category = category_of(target) if target is not None else category_of(row)
+            category = category_of(target, categories) if target is not None else category_of(row, categories)
             magnitude = abs(money(row.get("金额")))
             day = day_of(row)
             for tag in tags:
@@ -108,7 +119,7 @@ def rollup(records: list[dict[str, Any]]) -> dict[str, TagRollup]:
         if tx_type == "支出":
             tags = parse_tags(row.get("tags"))
             magnitude = abs(money(row.get("金额")))
-            category = category_of(row)
+            category = category_of(row, categories)
             day = day_of(row)
             for tag in tags:
                 item = stats[tag]
@@ -146,9 +157,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Scan all ledger shards and total tags.")
     parser.add_argument("paths", nargs="+", type=Path, help="Ledger files or directories. Every shard is scanned.")
     parser.add_argument("--shard", choices=["day", "month"], default="month", help="Basename key used to index shards.")
+    parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
+    parser.add_argument("--categories", type=Path, help="Category config. Default: data/categories.json when present.")
     args = parser.parse_args()
 
-    records, files = collect(args.paths)
+    config = load_skill_config(args.paths, args.accounts, args.categories)
+    if config.errors:
+        raise SystemExit("\n".join(config.errors))
+    records, files = collect(args.paths, config)
     if not files:
         raise SystemExit("no ledger files found")
     grouped = index_shard_files(files, args.shard)
@@ -159,7 +175,7 @@ def main() -> int:
     print(f"分片({args.shard}): {', '.join(keys) if keys else '无'}")
     print("全部分片已扫描")
 
-    stats = rollup(records)
+    stats = rollup(records, config.categories)
     if not stats:
         print("\n无标签")
         return 0
