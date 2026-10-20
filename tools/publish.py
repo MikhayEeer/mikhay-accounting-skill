@@ -107,8 +107,22 @@ def require(config: dict[str, str], platform: str, keys: list[str]) -> None:
 def build_staging() -> tuple[Path, Path]:
     temp = Path(tempfile.mkdtemp(prefix="mikhay-publish-"))
     archive = temp / "skill.zip"
+    # core.autocrlf=true would turn LF into CRLF inside the archive; some
+    # registries (ModelScope) parse SKILL.md frontmatter line-by-line and fail
+    # on CRLF, so archive from the index without EOL conversion.
     subprocess.run(
-        ["git", "-C", str(ROOT), "archive", "--format=zip", "-o", str(archive), "HEAD"],
+        [
+            "git",
+            "-C",
+            str(ROOT),
+            "-c",
+            "core.autocrlf=false",
+            "archive",
+            "--format=zip",
+            "-o",
+            str(archive),
+            "HEAD",
+        ],
         check=True,
         capture_output=True,
     )
@@ -118,6 +132,10 @@ def build_staging() -> tuple[Path, Path]:
     archive.unlink()
     for name in ("tests", "tools", ".github"):
         shutil.rmtree(target / name, ignore_errors=True)
+    # SkillHub.cn rejects dotfiles such as .clawhubignore; they are irrelevant
+    # for the publish archive because the heavy directories are already gone.
+    for name in (".clawhubignore", ".gitignore"):
+        (target / name).unlink(missing_ok=True)
     return temp, target
 
 
@@ -272,6 +290,12 @@ def publish_skillhub(
     token = config_value(config, "token", ["SKILLHUB_TOKEN"])
     if not dry_run:
         require(config, "skillhub", ["token"])
+    # SkillHub.cn rejects extensionless files such as LICENSE (and dotfiles);
+    # keep them in the repo but publish without them.
+    skillhub_dir = temp_dir / "skillhub-package"
+    if skillhub_dir.exists():
+        shutil.rmtree(skillhub_dir)
+    shutil.copytree(staging, skillhub_dir, ignore=shutil.ignore_patterns("LICENSE"))
     cli = ensure_skillhub_cli(temp_dir)
     env = dict(os.environ)
     env["SKILLHUB_SKIP_SELF_UPGRADE"] = "1"
@@ -280,7 +304,7 @@ def publish_skillhub(
         sys.executable,
         str(cli),
         "publish",
-        str(staging),
+        str(skillhub_dir),
         "--host",
         host,
         "--changelog",
