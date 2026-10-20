@@ -15,7 +15,6 @@ from ledgerlib import (
     ACCOUNT_KINDS,
     CREDIT_MODES,
     CURRENCY_RE,
-    INVEST_OUT_SUBCATEGORY,
     REIMBURSE_STATUSES,
     SCHEMA_VERSION,
     TYPES,
@@ -37,6 +36,7 @@ from ledgerlib import (
     parse_time,
     record_id,
     reimburse_ref,
+    reimburse_status,
     resolve_account,
     target_account,
 )
@@ -62,12 +62,18 @@ def _check_upper(prefix: str, value: Any, max_date: date, errors: list[str], fie
         errors.append(f"{prefix}: {field} {parsed.date().isoformat()} is after upper bound {max_date.isoformat()}")
 
 
-def _check_currency(prefix: str, row: dict[str, Any], amount: Decimal | None, errors: list[str]) -> None:
+def _check_currency(
+    prefix: str,
+    row: dict[str, Any],
+    amount: Decimal | None,
+    errors: list[str],
+    base_currency: str = "CNY",
+) -> None:
     raw_currency = row.get("currency", "")
     if not _blank(raw_currency) and not CURRENCY_RE.fullmatch(str(raw_currency).strip().upper()):
         errors.append(f"{prefix}: currency must be a 3-letter code")
         return
-    currency = currency_of(row)
+    currency = currency_of(row, base_currency)
     original = row.get("original_amount", "")
     fx = row.get("fx_rate", "")
     cny = row.get("cny_amount", "")
@@ -82,23 +88,26 @@ def _check_currency(prefix: str, row: dict[str, Any], amount: Decimal | None, er
         errors.append(f"{prefix}: cny_amount must be numeric")
     if amount is None:
         return
-    if currency == "CNY":
+    if currency == base_currency:
         if fx_rate is not None and fx_rate != 1:
-            errors.append(f"{prefix}: CNY fx_rate must be 1")
+            errors.append(f"{prefix}: {base_currency} fx_rate must be 1")
         if original_amount is not None and original_amount != amount:
-            errors.append(f"{prefix}: CNY original_amount must equal 金额")
+            errors.append(f"{prefix}: {base_currency} original_amount must equal 金额")
         if cny_amount is not None and cny_amount != amount:
-            errors.append(f"{prefix}: cny_amount must equal 金额")
+            errors.append(f"{prefix}: base-currency amount must equal 金额")
         return
     if original_amount is None or fx_rate is None:
-        errors.append(f"{prefix}: non-CNY records require original_amount and fx_rate")
+        errors.append(
+            f"{prefix}: non-{base_currency} records require original_amount and fx_rate "
+            f"(base currency is {base_currency}, set in data/settings.json)"
+        )
         return
     expected = (original_amount * fx_rate).quantize(Decimal("0.01"))
     actual = amount.quantize(Decimal("0.01"))
     if abs(expected - actual) > Decimal("0.01"):
         errors.append(f"{prefix}: 金额 {actual} != original_amount * fx_rate {expected}")
     if cny_amount is not None and abs(cny_amount.quantize(Decimal("0.01")) - actual) > Decimal("0.01"):
-        errors.append(f"{prefix}: cny_amount must equal 金额")
+        errors.append(f"{prefix}: base-currency amount must equal 金额")
 
 
 def validate_records(
@@ -109,6 +118,7 @@ def validate_records(
     catalog: dict[str, dict[str, Any]] | None = None,
     categories: CategoryCatalog | None = None,
     strict: bool = False,
+    base_currency: str = "CNY",
 ) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -162,11 +172,6 @@ def validate_records(
                 warnings.append(f"{prefix}: 退款 usually uses a positive 金额")
             elif tx_type == "报销" and amount < 0:
                 warnings.append(f"{prefix}: 报销 usually uses a positive 金额")
-            elif tx_type == "投资" and not pair_id(row):
-                if norm_subcategory == INVEST_OUT_SUBCATEGORY and amount < 0:
-                    warnings.append(f"{prefix}: 赎回 usually uses a positive 金额 on the cash account")
-                elif norm_subcategory != INVEST_OUT_SUBCATEGORY and amount > 0:
-                    warnings.append(f"{prefix}: 投资投入 usually uses a negative 金额 on the cash account")
             elif tx_type == "转账" and amount < 0 and not pair_id(row):
                 warnings.append(f"{prefix}: legacy 转账 usually uses a positive 金额; pair legs may be signed")
         resolved_account = resolve_account(account, catalog)
@@ -214,7 +219,7 @@ def validate_records(
                 errors.append(f"{prefix}: {message}")
             elif status == "legacy":
                 warnings.append(f"{prefix}: {message}")
-        _check_currency(prefix, row, amount, errors)
+        _check_currency(prefix, row, amount, errors, base_currency)
         noted_target = target_account(row)
         if noted_target:
             resolved_target = resolve_account(noted_target, catalog)
@@ -243,6 +248,15 @@ def validate_records(
                 warnings.append(f"{prefix}: 预计报销 belongs on 支出 records")
             elif amount is not None and expected_amount > abs(amount):
                 warnings.append(f"{prefix}: 预计报销 is larger than 金额")
+        if (
+            tx_type == "支出"
+            and amount is not None
+            and amount == 0
+            and reimburse_status(row) == "待报销"
+        ):
+            warnings.append(
+                f"{prefix}: 金额为 0 的支出仍标为 待报销；改回原金额，或把 报销状态 改成 已报销"
+            )
         rid = record_id(row)
         if rid:
             if rid in seen_ids:
@@ -253,7 +267,10 @@ def validate_records(
         if amount is not None and is_datetime(row.get("时间")):
             dup_key = (str(row.get("时间", "")).strip(), tx_type, amount, account, str(row.get("备注", "")).strip())
             if dup_key in seen_rows:
-                errors.append(f"{prefix}: duplicate of record[{seen_rows[dup_key]}]")
+                warnings.append(
+                    f"{prefix}: same time/type/amount/account/note as record[{seen_rows[dup_key]}]; "
+                    "check for an accidental double entry"
+                )
             else:
                 seen_rows[dup_key] = i
         if pair_id(row):
@@ -550,6 +567,7 @@ def validate_book(
     catalog: dict[str, dict[str, Any]] | None = None,
     categories: CategoryCatalog | None = None,
     strict: bool = False,
+    base_currency: str = "CNY",
 ) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -578,6 +596,7 @@ def validate_book(
         catalog=catalog,
         categories=categories,
         strict=strict,
+        base_currency=base_currency,
     )
     asset_errors, asset_warnings = validate_assets(
         book.get("asset_snapshots") or [], catalog, max_date, strict=strict
@@ -632,6 +651,11 @@ def main() -> int:
         help="Category config. Default: data/categories.json next to the ledger or in the working directory.",
     )
     parser.add_argument(
+        "--settings",
+        type=Path,
+        help="Workspace settings such as base_currency. Default: data/settings.json when present.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="Treat custom accounts, custom categories, and type/category conflicts as errors. Default: warnings.",
@@ -645,7 +669,7 @@ def main() -> int:
     else:
         max_date = default_max_date()
 
-    config = load_skill_config(args.paths, args.accounts, args.categories)
+    config = load_skill_config(args.paths, args.accounts, args.categories, args.settings)
     files = collect_paths(args.paths)
     if not files:
         raise SystemExit("no ledger files found")
@@ -678,6 +702,7 @@ def main() -> int:
             catalog=config.catalog,
             categories=config.categories,
             strict=args.strict,
+            base_currency=config.base_currency,
         )
         errors.extend(book_errors)
         warnings.extend(book_warnings)
@@ -693,6 +718,7 @@ def main() -> int:
                 catalog=catalog,
                 categories=config.categories,
                 strict=args.strict,
+                base_currency=config.base_currency,
             )
             errors.extend(f"{path}: {item}" for item in book_errors)
             warnings.extend(f"{path}: {item}" for item in book_warnings)
@@ -705,6 +731,7 @@ def main() -> int:
             catalog=catalog,
             categories=config.categories,
             strict=args.strict,
+            base_currency=config.base_currency,
         )
         errors.extend(record_errors)
         warnings.extend(record_warnings)

@@ -2,7 +2,7 @@
 
 # Mikhay 记账技能
 
-技能版本 `0.4.0`（见 `SKILL.md` frontmatter）。账本 `schema_version` 仍是 `0.3.0`，记录格式保持兼容。未改动的 `0.2.0` 账本仍能通过校验，统计结果不变。
+技能版本 `0.4.2`（见 `SKILL.md` frontmatter）。账本 `schema_version` 仍是 `0.3.0`，记录格式保持兼容。未改动的 `0.2.0` 账本仍能通过校验，统计结果不变。
 
 安装：`npx skills add MikhayEeer/mikhay-accounting-skill`
 
@@ -56,7 +56,15 @@
 }
 ```
 
-`replace_defaults: true` 会丢弃默认清单，让文件成为完整定义。配置之外的账户或类别默认只警告；要硬卡就用 `--strict`。
+`replace_defaults: true` 会丢弃默认清单，让文件成为完整定义。配置之外的账户或类别默认只警告；要硬卡就用 `--strict`。账户上加 `投资账户: true` 可以明确投资方向。别名历史窗口也写在同一个文件里，格式是 `{"名称", "起", "止"}`；不再有单独的 `aliases.json`。
+
+`data/settings.json` 改本位币和赎回标记：
+
+```json
+{"base_currency": "CNY", "invest_out_subcategory": "赎回"}
+```
+
+没写 `currency` 的流水用本位币；外币流水会另按原币合计。`data/import_rules.json` 可以替换导入关键词表、兜底类别和来源账户映射，见 `import_rules.md`。
 
 ## 导入导出
 
@@ -117,11 +125,11 @@ python scripts/summarize_tags.py data/ledger
 - **花销**：支出毛额减去退款。退款（`收支类型=退款` 或 `refund_of`）不是收入，也不算一笔新的消费。报表同时给出毛额和净额。全额退款、全额报销或 AA 后净额为 0 时，直接把原记录的金额改成 `0`，不要新增记录。
 - **内部转账**：账户之间的 `转账`。`pairid` 成对的两条腿只计一次。转账不进入花销。
 
-标签使用 `trip:`、`event:`、`person:`、`nature:`。`summarize_tags.py` 对每个标签给出毛额、净额、按日合计，以及类别行上的占比。
+标签命名空间自由：任何「字母开头的 prefix:suffix」都合法（`trip:`、`event:`、`project:`、`pet:`）。`summarize_tags.py` 对每个标签给出毛额、净额、按日合计，以及类别行上的占比。
 
-可选字段还包括 `currency`（默认 CNY）、`original_amount`、`fx_rate`、`cny_amount`。合计使用人民币 `金额`。新写出的 JSON 带 `schema_version`。旧账本没有这些字段也能用。
+可选字段还包括 `currency`（默认是配置的本位币，初始 `CNY`）、`original_amount`、`fx_rate`、`cny_amount`。主合计使用本位币 `金额`，外币流水另按原币列一节。新写出的 JSON 带 `schema_version`。旧账本没有这些字段也能用。
 
-## 净资产、信用卡与发薪日
+## 净资产与信用卡
 
 ```bash
 python scripts/summarize_assets.py data/assets/2026/2026-06.assets.json --cc-method A
@@ -133,7 +141,7 @@ python scripts/project_assets.py data/assets/assets.json data/ledger/2026/2026-0
 
 信用卡余额默认用方法 A：最近快照 + 快照之后的流水。方法 B 从零重放该卡流水、不用快照。输出会写明用的是哪一种。
 
-`--forecast` 给出每张卡的预计账单和预计还款，并对照发薪日现金流。发薪日是当月最后一个工作日（周一至周五）。
+`--forecast` 给出每张卡的预计账单、预计还款、还款日和本月现金流。技能不猜发薪日；想要工资行就自己记账。
 
 ## 资产
 

@@ -17,6 +17,25 @@ Use `scripts/import_ledger.py` to convert third-party CSV/XLSX bills into the st
 - 账户: `账户`, `支付方式`, `付款方式`, `收/付款方式`
 - 备注: `备注`, `商品`, `商品说明`, `交易对方`, `商户`, `摘要`, `说明`
 
+## Keyword Rules Config
+
+`data/import_rules.json` (optional; `--import-rules PATH`) replaces the built-in keyword table:
+
+```json
+{
+  "category_keywords": [
+    {"类别": "宠物", "子类": "猫粮", "关键词": ["猫粮", "猫砂"]}
+  ],
+  "fallback": {"类别": "宠物", "子类": "其他"},
+  "source_accounts": {"alipay": "支付宝", "wechat": "微信钱包"}
+}
+```
+
+- `category_keywords` replaces the starter table. Set `append_defaults: true` to keep the starter rules as well.
+- `fallback` is used when no rule matches. Both values must exist in `data/categories.json`; otherwise the first configured category is used.
+- `source_accounts` maps a bill source token to a configured account. A token with no configured account falls back to the first included asset account.
+- Classification never emits a category that is not in the configured catalog; it falls through to the fallback pair instead.
+
 ## Import Policy
 
 - Preserve existing valid `类别/子类`.

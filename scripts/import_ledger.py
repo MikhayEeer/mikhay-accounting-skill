@@ -19,6 +19,7 @@ from xml.etree import ElementTree as ET
 from ledgerlib import (
     SCHEMA_VERSION,
     SkillConfig,
+    find_config_path,
     load_skill_config,
     resolve_account,
     shard_key,
@@ -75,10 +76,10 @@ COLUMN_ALIASES = {
     "fx_rate": ["fx_rate", "汇率"],
     "cny_amount": ["cny_amount", "人民币金额"],
 }
-KEYWORD_RULES = [
+# Starter keyword table. Override it with data/import_rules.json.
+DEFAULT_CATEGORY_KEYWORDS: list[tuple[str, str, list[str]]] = [
     ("收入", "工资", ["工资", "薪资", "salary"]),
-    ("收入", "报销", ["报销"]),
-    ("收入", "补贴", ["补贴", "津贴"]),
+    ("收入", "补贴", ["补贴", "津贴", "补助"]),
     ("食品餐饮", "外卖", ["外卖", "饿了么", "美团外卖"]),
     ("食品餐饮", "早餐", ["早餐"]),
     ("食品餐饮", "午餐", ["午餐"]),
@@ -109,6 +110,90 @@ KEYWORD_RULES = [
     ("休闲娱乐", "KTV", ["KTV", "卡拉OK", "卡拉 OK"]),
     ("休闲娱乐", "旅游度假", ["旅游", "度假"]),
 ]
+
+
+IMPORT_RULES_FILE = "import_rules.json"
+
+
+class ImportRules:
+    """Category keyword table, fallback pair, and source-account map for imports."""
+
+    def __init__(
+        self,
+        category_keywords: list[tuple[str, str, list[str]]] | None = None,
+        fallback: tuple[str, str] | None = None,
+        source_accounts: dict[str, str] | None = None,
+        errors: list[str] | None = None,
+    ) -> None:
+        self.category_keywords = list(category_keywords or DEFAULT_CATEGORY_KEYWORDS)
+        self.fallback = fallback
+        self.source_accounts = dict(source_accounts or DEFAULT_ACCOUNT_BY_SOURCE)
+        self.errors = list(errors or [])
+
+
+def load_import_rules(path: Path | str | None = None) -> ImportRules:
+    keywords = list(DEFAULT_CATEGORY_KEYWORDS)
+    fallback: tuple[str, str] | None = None
+    source_accounts = dict(DEFAULT_ACCOUNT_BY_SOURCE)
+    errors: list[str] = []
+    if path is None:
+        return ImportRules(keywords, fallback, source_accounts)
+    config_path = Path(path)
+    if not config_path.is_file():
+        return ImportRules(keywords, fallback, source_accounts, [f"import rules not found: {config_path}"])
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as exc:
+        return ImportRules(keywords, fallback, source_accounts, [f"import_rules: invalid JSON: {exc}"])
+    if not isinstance(data, dict):
+        return ImportRules(keywords, fallback, source_accounts, ["import_rules: config must be a JSON object"])
+    if data.get("category_keywords") is not None:
+        rows = data.get("category_keywords")
+        if not isinstance(rows, list):
+            errors.append("import_rules.category_keywords must be a list")
+        else:
+            cleaned: list[tuple[str, str, list[str]]] = []
+            for index, row in enumerate(rows, 1):
+                if not isinstance(row, dict):
+                    errors.append(f"import_rules.category_keywords[{index}]: must be an object")
+                    continue
+                category = str(row.get("类别", "")).strip()
+                subcategory = str(row.get("子类", "")).strip()
+                words = row.get("关键词", [])
+                if isinstance(words, str):
+                    words = [part.strip() for part in re.split(r"[;；,，\s]+", words) if part.strip()]
+                if not category or not subcategory or not isinstance(words, list) or not words:
+                    errors.append(
+                        f"import_rules.category_keywords[{index}]: needs 类别, 子类, and a 关键词 list"
+                    )
+                    continue
+                cleaned.append((category, subcategory, [str(word) for word in words]))
+            if cleaned and not data.get("append_defaults"):
+                keywords = cleaned
+            else:
+                keywords = [*keywords, *cleaned]
+    raw_fallback = data.get("fallback")
+    if isinstance(raw_fallback, dict):
+        category = str(raw_fallback.get("类别", "")).strip()
+        subcategory = str(raw_fallback.get("子类", "")).strip()
+        if category and subcategory:
+            fallback = (category, subcategory)
+        elif raw_fallback:
+            errors.append("import_rules.fallback needs 类别 and 子类")
+    elif raw_fallback is not None:
+        errors.append("import_rules.fallback must be an object")
+    raw_sources = data.get("source_accounts")
+    if isinstance(raw_sources, dict):
+        for source, account in raw_sources.items():
+            source_key = str(source).strip().lower()
+            account_name = str(account or "").strip()
+            if source_key and account_name:
+                source_accounts[source_key] = account_name
+    elif raw_sources is not None:
+        errors.append("import_rules.source_accounts must be an object")
+    if errors:
+        return ImportRules(keywords, fallback, source_accounts, errors)
+    return ImportRules(keywords, fallback, source_accounts)
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -254,52 +339,93 @@ def normalize_type(raw_type: str, amount: Decimal | None, text: str) -> str:
     return "收入"
 
 
+def fallback_pair(config: SkillConfig, rules: ImportRules) -> tuple[str, str]:
+    """The configured fallback, or the first category when the fallback is absent."""
+    if rules.fallback and config.categories.accepts(*rules.fallback):
+        return rules.fallback
+    for category, subs in config.categories.map.items():
+        for subcategory in sorted(subs):
+            return category, subcategory
+    return "未分类", "其他"
+
+
 def classify(
     row: dict[str, Any],
     tx_type: str,
     text: str,
     account: str,
     config: SkillConfig,
+    rules: ImportRules,
 ) -> tuple[str, str, bool]:
     raw_category = get_value(row, "类别")
     raw_subcategory = get_value(row, "子类")
     category, subcategory, _ = config.normalize_pair(raw_category, raw_subcategory)
     if config.categories.accepts(category, subcategory):
         return category, subcategory, False
+    lowered = text.lower()
     if tx_type == "退款":
-        lowered = text.lower()
-        for category, subcategory, keywords in KEYWORD_RULES:
-            if category in {"收入"}:
+        for rule_category, rule_subcategory, keywords in rules.category_keywords:
+            if rule_category in {"收入"}:
                 continue
-            if not config.categories.accepts(category, subcategory):
+            if not config.categories.accepts(rule_category, rule_subcategory):
                 continue
             if any(keyword.lower() in lowered for keyword in keywords):
-                return category, subcategory, False
-        return "退款", "退款", False
+                return rule_category, rule_subcategory, False
+        if config.categories.accepts("退款", "退款"):
+            return "退款", "退款", False
+        return (*fallback_pair(config, rules), False)
     if tx_type == "报销":
-        return "报销", "其他", False
+        if config.categories.accepts("报销", "其他"):
+            return "报销", "其他", False
+        return (*fallback_pair(config, rules), False)
     if tx_type == "投资":
-        return "投资", "其他", False
+        if config.categories.accepts("投资", "其他"):
+            return "投资", "其他", False
+        return (*fallback_pair(config, rules), False)
     if tx_type == "收入":
-        for category, subcategory, keywords in KEYWORD_RULES:
-            if category == "收入" and any(k.lower() in text.lower() for k in keywords):
-                return category, subcategory, False
-        return "收入", "其他", raw_category != "收入"
+        for rule_category, rule_subcategory, keywords in rules.category_keywords:
+            if rule_category == "收入" and any(k.lower() in lowered for k in keywords):
+                return rule_category, rule_subcategory, False
+        if config.categories.accepts("收入", "其他"):
+            return "收入", "其他", raw_category != "收入"
+        return (*fallback_pair(config, rules), raw_category != "收入")
     if tx_type == "还款":
         credit_account = config.catalog.get(account, {}).get("credit", False)
-        return "还款", "信用卡还款" if credit_account else "其他", False
+        pair = ("还款", "信用卡还款") if credit_account else ("还款", "其他")
+        if config.categories.accepts(*pair):
+            return (*pair, False)
+        return (*fallback_pair(config, rules), False)
     if tx_type == "转账":
-        return "转账", "个人转账", False
-    lowered = text.lower()
-    for category, subcategory, keywords in KEYWORD_RULES:
-        if category == "收入" or not config.categories.accepts(category, subcategory):
+        if config.categories.accepts("转账", "个人转账"):
+            return "转账", "个人转账", False
+        return (*fallback_pair(config, rules), False)
+    for rule_category, rule_subcategory, keywords in rules.category_keywords:
+        if rule_category == "收入" or not config.categories.accepts(rule_category, rule_subcategory):
             continue
         if any(k.lower() in lowered for k in keywords):
-            return category, subcategory, False
-    return "购物消费", "其他", True
+            return rule_category, rule_subcategory, False
+    return (*fallback_pair(config, rules), True)
 
 
-def normalize_account(raw_account: str, source: str, fallback: str | None, config: SkillConfig) -> str:
+def configured_source_account(config: SkillConfig, rules: ImportRules, source: str) -> str:
+    name = rules.source_accounts.get(source.lower(), "")
+    if name:
+        resolved = config.resolve_account(name)
+        if resolved in config.catalog:
+            return resolved
+    for account, meta in config.catalog.items():
+        if meta.get("kind") == "资产" and meta.get("include", "included") == "included":
+            return account
+    return ""
+
+
+def normalize_account(
+    raw_account: str,
+    source: str,
+    fallback: str | None,
+    config: SkillConfig,
+    rules: ImportRules,
+) -> str:
     """Resolve an account through configured aliases, then by substring match."""
     if raw_account:
         resolved = config.resolve_account(raw_account)
@@ -310,11 +436,14 @@ def normalize_account(raw_account: str, source: str, fallback: str | None, confi
             if account.casefold() in lowered:
                 return account
             for alias in meta.get("aliases") or []:
-                if str(alias).casefold() in lowered:
+                alias_name = alias.get("名称") if isinstance(alias, dict) else alias
+                if str(alias_name).casefold() in lowered:
                     return account
     if fallback:
-        return config.resolve_account(fallback)
-    return DEFAULT_ACCOUNT_BY_SOURCE.get(source, "支付宝")
+        resolved = config.resolve_account(fallback)
+        if resolved in config.catalog:
+            return resolved
+    return configured_source_account(config, rules, source)
 
 
 def normalize_record(
@@ -322,6 +451,7 @@ def normalize_record(
     source: str,
     fallback_account: str | None,
     config: SkillConfig,
+    rules: ImportRules,
 ) -> dict[str, Any]:
     remark_parts = [get_value(row, "备注"), get_value(row, "note")]
     text = " ".join(part for part in remark_parts if part)
@@ -342,18 +472,19 @@ def normalize_record(
         signed_amount = amount
     else:
         signed_amount = abs(amount)
-    currency = get_value(row, "currency").upper() or "CNY"
+    base_currency = config.base_currency
+    currency = get_value(row, "currency").upper() or base_currency
     original_amount = parse_amount(get_value(row, "original_amount"))
     fx_rate = parse_amount(get_value(row, "fx_rate"))
     cny_amount = parse_amount(get_value(row, "cny_amount"))
     if original_amount is not None:
         original_amount = -abs(original_amount) if tx_type == "支出" else abs(original_amount)
-    if currency != "CNY" and original_amount is not None and fx_rate is not None:
+    if currency != base_currency and original_amount is not None and fx_rate is not None:
         signed_amount = (original_amount * fx_rate).quantize(Decimal("0.01"))
-    elif cny_amount is not None and currency != "CNY":
+    elif cny_amount is not None and currency != base_currency:
         signed_amount = -abs(cny_amount) if tx_type == "支出" else abs(cny_amount)
-    account = normalize_account(get_value(row, "账户"), source, fallback_account, config)
-    category, subcategory, pending = classify(row, tx_type, text, account, config)
+    account = normalize_account(get_value(row, "账户"), source, fallback_account, config, rules)
+    category, subcategory, pending = classify(row, tx_type, text, account, config, rules)
     note_parts = []
     existing_note = get_value(row, "note")
     if existing_note:
@@ -377,7 +508,7 @@ def normalize_record(
         value = get_value(row, field)
         if value:
             record[field] = value
-    if currency and currency != "CNY":
+    if currency and currency != base_currency:
         record["currency"] = currency
         if original_amount is not None:
             record["original_amount"] = float(original_amount) if original_amount % 1 else int(original_amount)
@@ -385,7 +516,7 @@ def normalize_record(
             record["fx_rate"] = float(fx_rate) if fx_rate % 1 else int(fx_rate)
         record["cny_amount"] = record["金额"]
     elif get_value(row, "currency"):
-        record["currency"] = "CNY"
+        record["currency"] = base_currency
     return record
 
 
@@ -473,6 +604,8 @@ def main() -> int:
     parser.add_argument("--account", help="Fallback account when the source file has no account column.")
     parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
     parser.add_argument("--categories", type=Path, help="Category config. Default: data/categories.json when present.")
+    parser.add_argument("--settings", type=Path, help="Workspace settings. Default: data/settings.json when present.")
+    parser.add_argument("--import-rules", type=Path, help="Import keyword rules. Default: data/import_rules.json when present.")
     parser.add_argument("--month", help="Only import records whose 时间 starts with YYYY-MM.")
     parser.add_argument("--split-by-month", action="store_true", help="Write one JSON file per month.")
     parser.add_argument("--shard", choices=["day", "month"], help="Write one JSON file per day or month. Keys use the file basename.")
@@ -498,9 +631,18 @@ def main() -> int:
         [args.input, args.output if args.output else Path("data")],
         args.accounts,
         args.categories,
+        args.settings,
     )
     if config.errors:
         raise SystemExit("\n".join(config.errors))
+    rules_path = (
+        args.import_rules
+        if args.import_rules is not None
+        else find_config_path(IMPORT_RULES_FILE, [args.input, args.output if args.output else Path("data")], None)
+    )
+    rules = load_import_rules(rules_path)
+    if rules.errors:
+        raise SystemExit("\n".join(rules.errors))
     if args.account:
         resolved_account = config.resolve_account(args.account)
         if resolved_account not in config.catalog:
@@ -509,10 +651,15 @@ def main() -> int:
             )
         args.account = resolved_account
     rows = load_rows(args.input)
-    records = [normalize_record(row, args.source, args.account, config) for row in rows]
+    records = [normalize_record(row, args.source, args.account, config, rules) for row in rows]
     if args.month:
         records = [record for record in records if str(record["时间"]).startswith(args.month)]
-    errors, warnings = validate_records(records, catalog=config.catalog, categories=config.categories)
+    errors, warnings = validate_records(
+        records,
+        catalog=config.catalog,
+        categories=config.categories,
+        base_currency=config.base_currency,
+    )
     if errors:
         print("INVALID IMPORT", file=sys.stderr)
         for error in errors[:50]:

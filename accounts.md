@@ -19,6 +19,7 @@ Shape:
     {"账户": "招商银行", "别名": ["招行", "CMB"], "账户类型": "资产", "纳入": "included", "信用卡": false},
     {"账户": "微信钱包", "别名": ["微信"], "账户类型": "资产"},
     {"账户": "花呗", "别名": ["支付宝花呗"], "账户类型": "负债", "信用卡": true},
+    {"账户": "基金", "账户类型": "资产", "投资账户": true},
     {"账户": "公积金", "账户类型": "资产", "纳入": "excluded"}
   ],
   "account_aliases": {"零钱": "微信钱包"}
@@ -27,6 +28,8 @@ Shape:
 
 - `replace_defaults: true` drops the starter accounts, so the file is the complete account list.
 - `别名` (or `aliases`) lets natural speech and third-party bills use nicknames: 微信, 建行, 招行, 花呗. Resolution is exact after trimming and case folding. A configured alias wins over a starter account with the same name, so an agent can rename a starter account without editing the scripts.
+- An alias entry may be an object with a history window: `{"名称": "旧招行", "含义": "招行", "起": "2026-01-01", "止": "2026-06-30"}`. `scripts/lint_ledger.py` warns when that name is used outside its window. There is no separate `aliases.json`.
+- `投资账户: true` marks a fund, brokerage, or crypto account. Money entering it counts as 投入; money leaving it counts as 赎回. Without the flag the cash-account sign is used (negative 投入, positive 赎回), which is less reliable when a pair could be read either way.
 - `账户类型` is `资产` or `负债`.
 - `纳入` is `included` or `excluded` (备查). `备查: true` also means excluded.
 - `信用卡: true` marks a liability account as a credit card for method B replay and card reports.

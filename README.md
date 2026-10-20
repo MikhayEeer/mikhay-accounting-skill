@@ -2,7 +2,7 @@
 
 # Mikhay Accounting Skill
 
-Skill version `0.4.0` (see `SKILL.md` frontmatter). Ledger `schema_version` is still `0.3.0`, because the record format stayed compatible. An unedited `0.2.0` book still validates, and its totals stay the same.
+Skill version `0.4.2` (see `SKILL.md` frontmatter). Ledger `schema_version` is still `0.3.0`, because the record format stayed compatible. An unedited `0.2.0` book still validates, and its totals stay the same.
 
 Install: `npx skills add MikhayEeer/mikhay-accounting-skill`
 
@@ -95,11 +95,11 @@ Two bases:
 - **花销 (spending):** gross expense minus refunds. A refund (`收支类型=退款` or `refund_of`) is not income and is not a new purchase. Reports show both gross and net.
 - **内部转账 (internal transfers):** `转账` between accounts. A `pairid` pair is counted once. Transfers are not spending.
 
-Tags use `trip:`, `event:`, `person:`, and `nature:`. `summarize_tags.py` prints gross, net, per-day totals, and the category share on the same line.
+Tag namespaces are free-form: any letter-first `prefix:suffix` is valid (`trip:`, `event:`, `project:`, `pet:`). `summarize_tags.py` prints gross, net, per-day totals, and the category share on the same line.
 
-Optional fields: `currency` (default CNY), `original_amount`, `fx_rate`, `cny_amount`. Totals use the CNY `金额`. New JSON files include `schema_version`. Older books that omit these fields still load.
+Optional fields: `currency` (default is the configured base currency, `CNY`), `original_amount`, `fx_rate`, `cny_amount`. Headline totals use the base-currency `金额`; foreign-currency rows are also summed per currency in an original-amount section. New JSON files include `schema_version`. Older books that omit these fields still load.
 
-## Net worth, credit cards, and payday
+## Net worth and credit cards
 
 ```bash
 python scripts/summarize_assets.py data/assets/2026/2026-06.assets.json --cc-method A
@@ -129,11 +129,19 @@ Accounts and categories are configuration, not code. Every script reads these fi
 }
 ```
 
-`replace_defaults: true` drops the starter list, so the file is the complete definition. Validation only warns on values that are outside the configured catalogs; add `--strict` when a hard gate is wanted.
+`replace_defaults: true` drops the starter list, so the file is the complete definition. Validation only warns on values that are outside the configured catalogs; add `--strict` when a hard gate is wanted. Add `投资账户: true` to an account to make investment direction explicit. Alias history windows live in the same file as `{"名称", "起", "止"}` entries; there is no separate `aliases.json`.
+
+`data/settings.json` changes the base currency and the redemption marker:
+
+```json
+{"base_currency": "CNY", "invest_out_subcategory": "赎回"}
+```
+
+Rows without `currency` use the base currency, and foreign-currency rows get their own original-amount totals. `data/import_rules.json` replaces the import keyword table, fallback pair, and source-account map; see `import_rules.md`.
 
 Credit-card balances default to method A: latest snapshot plus records after that snapshot. Method B replays the card ledger from zero and ignores the snapshot. The report names the method.
 
-`--forecast` prints each card's projected statement and repayment against payday cash flow. Payday is the last Monday–Friday of the month.
+`--forecast` prints each card's projected statement, repayment, and due date, plus the current-month cash flow. It does not guess a payday; record salary rows if you want an income line.
 
 ## Assets
 

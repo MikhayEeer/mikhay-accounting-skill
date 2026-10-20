@@ -23,13 +23,16 @@ from typing import Any, Iterable
 SCHEMA_VERSION = "0.3.0"
 # Empty and 0.2.0 books stay valid. Other values still warn.
 ACCEPTED_SCHEMA_VERSIONS = {"", "0.2.0", "0.3.0"}
-TAG_PREFIXES = ("trip:", "event:", "person:", "nature:")
+# Tag namespaces are free-form: any letter-first prefix works. These four are
+# only the recommended starter names used in the docs and examples.
+RECOMMENDED_TAG_PREFIXES = ("trip", "event", "person", "nature")
 TYPES = {"支出", "收入", "还款", "转账", "退款", "报销", "投资"}
 ACCOUNT_KINDS = {"资产", "负债"}
 INCLUDE_FLAGS = {"included", "excluded"}
 REIMBURSE_STATUSES = {"待报销", "已报销", "不报销"}
 CREDIT_MODES = {"debt_only", "with_limit"}
-INVEST_OUT_SUBCATEGORY = "赎回"
+DEFAULT_BASE_CURRENCY = "CNY"
+DEFAULT_INVEST_OUT_SUBCATEGORY = "赎回"
 
 # Starter account catalog. Accounts, aliases, inclusion flags, and credit-card
 # status are all editable in data/accounts.json; nothing here is a fixed enum.
@@ -91,6 +94,7 @@ SPEND_CATEGORIES = set(DEFAULT_CATEGORY_MAP) - {"收入", "还款", "转账", "�
 LEDGER_SUFFIXES = {".json", ".csv"}
 DECIMAL_RE = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?")
 CURRENCY_RE = re.compile(r"[A-Z]{3}")
+TAG_PREFIX_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
 TAG_SUFFIX_RE = re.compile(r"[\w.-]+")
 TARGET_RE = re.compile(r"(?:target_account|目标账户|还款账户)\s*[:=：]?\s*([^\s;；,，]+)")
 
@@ -104,7 +108,9 @@ def default_account_catalog() -> dict[str, dict[str, Any]]:
             "kind": meta["kind"],
             "include": meta["include"],
             "credit": bool(meta["credit"]),
+            "invest": bool(meta.get("invest", False)),
             "aliases": list(meta["aliases"]),
+            "alias_windows": [],
         }
         for name, meta in DEFAULT_ACCOUNTS.items()
     }
@@ -123,7 +129,8 @@ def account_alias_map(catalog: dict[str, dict[str, Any]] | None = None) -> dict[
     mapping: dict[str, str] = {}
     for name, meta in catalog.items():
         for alias in meta.get("aliases") or []:
-            key = alias_key(alias)
+            alias_name = alias.get("名称") if isinstance(alias, dict) else alias
+            key = alias_key(alias_name)
             if key and key != alias_key(name):
                 mapping[key] = name
     return mapping
@@ -217,7 +224,9 @@ def merge_account_policy(
             "kind": meta.get("kind", ""),
             "include": meta.get("include", "included"),
             "credit": bool(meta.get("credit", False)),
+            "invest": bool(meta.get("invest", False)),
             "aliases": list(meta.get("aliases") or []),
+            "alias_windows": list(meta.get("alias_windows") or []),
         }
         for name, meta in source.items()
     }
@@ -228,7 +237,10 @@ def merge_account_policy(
         if not name:
             errors.append(f"{prefix}: missing 账户")
             continue
-        current = catalog.get(name, {"kind": "", "include": "included", "credit": False, "aliases": []})
+        current = catalog.get(
+            name,
+            {"kind": "", "include": "included", "credit": False, "invest": False, "aliases": [], "alias_windows": []},
+        )
         kind = str(row.get("账户类型", "")).strip() or current["kind"]
         if kind and kind not in ACCOUNT_KINDS:
             errors.append(f"{prefix}: 账户类型 must be 资产 or 负债")
@@ -241,11 +253,16 @@ def merge_account_policy(
         credit = current.get("credit", False)
         if "信用卡" in row or "credit" in row:
             credit = truthy(row.get("信用卡", row.get("credit")))
+        invest = current.get("invest", False)
+        if "投资账户" in row or "invest" in row:
+            invest = truthy(row.get("投资账户", row.get("invest")))
         catalog[name] = {
             "kind": kind or "资产",
             "include": include or current.get("include") or "included",
             "credit": bool(credit),
+            "invest": bool(invest),
             "aliases": list(current.get("aliases") or []),
+            "alias_windows": list(current.get("alias_windows") or []),
         }
     return catalog, errors
 
@@ -293,6 +310,7 @@ DEFAULT_CATEGORIES = CategoryCatalog()
 
 ACCOUNTS_FILE = "accounts.json"
 CATEGORIES_FILE = "categories.json"
+SETTINGS_FILE = "settings.json"
 
 
 def find_config_path(
@@ -358,7 +376,8 @@ def load_accounts_config(
             errors.append(f"{prefix}: missing 账户")
             continue
         current = catalog.get(
-            name, {"kind": "", "include": "included", "credit": False, "aliases": []}
+            name,
+            {"kind": "", "include": "included", "credit": False, "invest": False, "aliases": [], "alias_windows": []},
         )
         kind = str(row.get("账户类型", row.get("kind", ""))).strip() or current.get("kind", "")
         if kind and kind not in ACCOUNT_KINDS:
@@ -372,21 +391,47 @@ def load_accounts_config(
         credit = bool(current.get("credit", False))
         if "信用卡" in row or "credit" in row:
             credit = truthy(row.get("信用卡", row.get("credit")))
+        invest = bool(current.get("invest", False))
+        if "投资账户" in row or "invest" in row:
+            invest = truthy(row.get("投资账户", row.get("invest")))
         aliases = list(current.get("aliases") or [])
+        windows = list(current.get("alias_windows") or [])
         raw_aliases = row.get("别名", row.get("aliases"))
         if raw_aliases not in (None, ""):
+            aliases = []
+            windows = []
             if isinstance(raw_aliases, str):
-                aliases = [part for part in re.split(r"[;；,，\s]+", raw_aliases) if part]
-                aliases = [part.strip() for part in aliases if part.strip()]
+                parts = [part.strip() for part in re.split(r"[;；,，\s]+", raw_aliases) if part.strip()]
+                aliases = parts
+                windows = [{"名称": part} for part in parts]
             elif isinstance(raw_aliases, list):
-                aliases = [str(part).strip() for part in raw_aliases if str(part).strip()]
+                for part in raw_aliases:
+                    if isinstance(part, str) and part.strip():
+                        aliases.append(part.strip())
+                        windows.append({"名称": part.strip()})
+                    elif isinstance(part, dict):
+                        alias_name = str(part.get("名称", part.get("name", ""))).strip()
+                        if not alias_name:
+                            errors.append(f"{prefix}: 别名 entry is missing 名称")
+                            continue
+                        aliases.append(alias_name)
+                        windows.append(
+                            {
+                                key: str(part.get(key, "") or "").strip()
+                                for key in ("名称", "含义", "起", "止")
+                            }
+                        )
+                    else:
+                        errors.append(f"{prefix}: 别名 entries must be strings or objects")
             else:
                 errors.append(f"{prefix}: 别名 must be a list or a string")
         catalog[name] = {
             "kind": kind or "资产",
             "include": include or current.get("include") or "included",
             "credit": credit,
+            "invest": invest,
             "aliases": aliases,
+            "alias_windows": windows,
         }
     alias_map = account_alias_map(catalog)
     raw_map = data.get("account_aliases") or {}
@@ -455,8 +500,38 @@ def load_categories_config(path: Path | str | None = None) -> tuple[CategoryCata
     return CategoryCatalog(mapping, category_aliases, subcategory_aliases), errors
 
 
+def load_settings_config(path: Path | str | None = None) -> tuple[dict[str, Any], list[str]]:
+    """Load optional workspace settings such as the base currency."""
+    settings: dict[str, Any] = {
+        "base_currency": DEFAULT_BASE_CURRENCY,
+        "invest_out_subcategory": DEFAULT_INVEST_OUT_SUBCATEGORY,
+    }
+    if path is None:
+        return settings, []
+    config_path = Path(path)
+    if not config_path.is_file():
+        return settings, [f"settings config not found: {config_path}"]
+    try:
+        data = loads_json(config_path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as exc:
+        return settings, [f"settings: invalid JSON: {exc}"]
+    if not isinstance(data, dict):
+        return settings, ["settings: config must be a JSON object"]
+    errors: list[str] = []
+    currency = str(data.get("base_currency", "") or "").strip().upper()
+    if currency:
+        if not CURRENCY_RE.fullmatch(currency):
+            errors.append("settings.base_currency must be a 3-letter code")
+        else:
+            settings["base_currency"] = currency
+    invest_out = str(data.get("invest_out_subcategory", "") or "").strip()
+    if invest_out:
+        settings["invest_out_subcategory"] = invest_out
+    return settings, errors
+
+
 class SkillConfig:
-    """Accounts, aliases, and categories for one ledger workspace."""
+    """Accounts, aliases, categories, and settings for one ledger workspace."""
 
     def __init__(
         self,
@@ -465,6 +540,8 @@ class SkillConfig:
         categories: CategoryCatalog | None = None,
         accounts_path: Path | None = None,
         categories_path: Path | None = None,
+        settings_path: Path | None = None,
+        settings: dict[str, Any] | None = None,
         errors: Iterable[str] | None = None,
     ) -> None:
         self.catalog = catalog if catalog is not None else default_account_catalog()
@@ -472,6 +549,12 @@ class SkillConfig:
         self.categories = categories if categories is not None else CategoryCatalog()
         self.accounts_path = accounts_path
         self.categories_path = categories_path
+        self.settings_path = settings_path
+        self.settings = settings or {}
+        self.base_currency = str(self.settings.get("base_currency", DEFAULT_BASE_CURRENCY))
+        self.invest_out_subcategory = str(
+            self.settings.get("invest_out_subcategory", DEFAULT_INVEST_OUT_SUBCATEGORY)
+        )
         self.errors = list(errors or [])
 
     @property
@@ -492,24 +575,32 @@ def load_skill_config(
     paths: Iterable[str | os.PathLike[str]] = (),
     accounts_path: str | os.PathLike[str] | None = None,
     categories_path: str | os.PathLike[str] | None = None,
+    settings_path: str | os.PathLike[str] | None = None,
 ) -> SkillConfig:
     errors: list[str] = []
     accounts_file = find_config_path(ACCOUNTS_FILE, paths, accounts_path)
     categories_file = find_config_path(CATEGORIES_FILE, paths, categories_path)
+    settings_file = find_config_path(SETTINGS_FILE, paths, settings_path)
     if accounts_path is not None and accounts_file is None:
         errors.append(f"accounts config not found: {accounts_path}")
     if categories_path is not None and categories_file is None:
         errors.append(f"categories config not found: {categories_path}")
+    if settings_path is not None and settings_file is None:
+        errors.append(f"settings config not found: {settings_path}")
     catalog, alias_map, account_errors = load_accounts_config(accounts_file)
     categories, category_errors = load_categories_config(categories_file)
+    settings, setting_errors = load_settings_config(settings_file)
     errors.extend(account_errors)
     errors.extend(category_errors)
+    errors.extend(setting_errors)
     return SkillConfig(
         catalog=catalog,
         alias_map=alias_map,
         categories=categories,
         accounts_path=accounts_file,
         categories_path=categories_file,
+        settings_path=settings_file,
+        settings=settings,
         errors=errors,
     )
 
@@ -728,23 +819,21 @@ def parse_tags(value: Any) -> list[str]:
 
 
 def tag_namespace(tag: str) -> str:
-    for prefix in TAG_PREFIXES:
-        if tag.startswith(prefix):
-            return prefix[:-1]
-    return ""
+    return tag.split(":", 1)[0] if ":" in tag else ""
 
 
 def check_tag(tag: str) -> tuple[str, str]:
-    """Return ('ok'|'legacy'|'error', message)."""
-    namespace = tag_namespace(tag)
-    if namespace:
-        suffix = tag.split(":", 1)[1]
-        if suffix and TAG_SUFFIX_RE.fullmatch(suffix):
-            return "ok", ""
-        return "error", f"invalid tag {tag!r}"
+    """Return ('ok'|'legacy'|'error', message).
+
+    Namespaces are chosen by the user. Any letter-first prefix is accepted, so
+    project:move or pet:vaccine work without extra configuration.
+    """
     if ":" in tag:
-        return "error", f"tag {tag!r} is outside trip:/event:/person:/nature:"
-    return "legacy", f"legacy tag {tag!r}; prefer trip:, event:, person:, or nature:"
+        namespace, suffix = tag.split(":", 1)
+        if TAG_PREFIX_RE.fullmatch(namespace) and suffix and TAG_SUFFIX_RE.fullmatch(suffix):
+            return "ok", ""
+        return "error", f"invalid tag {tag!r}; use prefix:suffix with a letter-first prefix"
+    return "legacy", f"legacy tag {tag!r}; prefer a namespace such as trip:, event:, person:, or nature:"
 
 
 def is_refund(row: dict[str, Any]) -> bool:
@@ -792,26 +881,15 @@ def pair_id(row: dict[str, Any]) -> str:
     return str(row.get("pairid", "")).strip()
 
 
-def currency_of(row: dict[str, Any]) -> str:
+def currency_of(row: dict[str, Any], default: str = DEFAULT_BASE_CURRENCY) -> str:
     text = str(row.get("currency", "") or "").strip().upper()
-    return text or "CNY"
+    return text or default
 
 
 def json_money(value: Decimal) -> int | float:
     if value == value.to_integral_value():
         return int(value)
     return float(value)
-
-
-def last_working_day(year: int, month: int) -> date:
-    """Last Monday–Friday of the month. Holidays are not subtracted."""
-    import calendar
-
-    day = calendar.monthrange(year, month)[1]
-    current = date(year, month, day)
-    while current.weekday() >= 5:
-        current -= timedelta(days=1)
-    return current
 
 
 def shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
@@ -944,26 +1022,32 @@ def _note_investment_leg(
     *,
     count_flow: bool,
     categories: CategoryCatalog | None = None,
+    catalog: dict[str, dict[str, Any]] | None = None,
 ) -> None:
+    """Record one investment leg.
+
+    Direction comes from the account role: money entering an account marked
+    as an investment account is 投入, money leaving it is 赎回. On a cash
+    account the sign is authoritative instead: negative is 投入, positive is 赎回.
+    """
     amount = money(row.get("金额"))
     account = str(row.get("账户", "")).strip()
+    meta = (catalog or {}).get(account, {})
     if account:
         totals.invest_by_account[account] += amount
-    _, subcategory = _category_of(row, categories)
-    if count_flow:
+    if count_flow and amount != 0:
         magnitude = abs(amount)
-        if subcategory == INVEST_OUT_SUBCATEGORY:
+        is_out = amount < 0 if meta.get("invest") else amount > 0
+        if is_out:
             totals.invest_out += magnitude
         else:
             totals.invest_in += magnitude
-    if target_account(row) and not pair_id(row):
-        target = target_account(row)
+    target = target_account(row)
+    if target and not pair_id(row):
         totals.invest_by_account[target] -= amount
         totals.invest_accounts.add(target)
         return
-    if subcategory == INVEST_OUT_SUBCATEGORY and amount < 0 and account:
-        totals.invest_accounts.add(account)
-    elif subcategory != INVEST_OUT_SUBCATEGORY and amount > 0 and account:
+    if meta.get("invest") and account:
         totals.invest_accounts.add(account)
 
 
@@ -979,6 +1063,9 @@ def _collect_pending(totals: FlowTotals, rows: list[dict[str, Any]]) -> None:
         if str(row.get("收支类型", "")).strip() != "支出":
             continue
         if reimburse_status(row) != "待报销":
+            continue
+        if abs(money(row.get("金额"))) == 0:
+            # A zero-amount row has nothing left to reimburse. Validation warns about it.
             continue
         raw_expected = row.get("预计报销", "")
         if raw_expected is None or str(raw_expected).strip() == "":
@@ -1005,6 +1092,7 @@ def accumulate(
     rows: list[dict[str, Any]],
     catalog: dict[str, dict[str, Any]] | None = None,
     categories: CategoryCatalog | None = None,
+    invest_out_subcategory: str = DEFAULT_INVEST_OUT_SUBCATEGORY,
 ) -> FlowTotals:
     """花销 counts spending net of refunds and received reimbursements.
 
@@ -1067,7 +1155,13 @@ def accumulate(
             if pid:
                 invest_legs[pid].append(row)
             else:
-                _note_investment_leg(totals, row, count_flow=True, categories=categories)
+                _note_investment_leg(
+                    totals,
+                    row,
+                    count_flow=True,
+                    categories=categories,
+                    catalog=catalog,
+                )
 
     for legs in pair_legs.values():
         outgoing = [abs(money(leg.get("金额"))) for leg in legs if money(leg.get("金额")) < 0]
@@ -1078,10 +1172,91 @@ def accumulate(
     for legs in invest_legs.values():
         if not legs:
             continue
-        _note_investment_leg(totals, legs[0], count_flow=True, categories=categories)
-        for leg in legs[1:]:
-            _note_investment_leg(totals, leg, count_flow=False, categories=categories)
+        flagged = [
+            leg
+            for leg in legs
+            if catalog.get(str(leg.get("账户", "")).strip(), {}).get("invest")
+        ]
+        counted_leg: dict[str, Any] | None = None
+        if flagged:
+            counted_leg = flagged[0]
+            _note_investment_leg(
+                totals,
+                counted_leg,
+                count_flow=True,
+                categories=categories,
+                catalog=catalog,
+            )
+        elif any(_category_of(leg, categories)[1] == invest_out_subcategory for leg in legs):
+            totals.invest_out += abs(money(legs[0].get("金额")))
+            counted_leg = legs[0]
+        else:
+            totals.invest_in += abs(money(legs[0].get("金额")))
+            counted_leg = legs[0]
+        for leg in legs:
+            if leg is counted_leg:
+                continue
+            _note_investment_leg(
+                totals,
+                leg,
+                count_flow=False,
+                categories=categories,
+                catalog=catalog,
+            )
     _collect_pending(totals, rows)
+    return totals
+
+
+def find_optional_data_file(
+    name: str,
+    paths: Iterable[str | os.PathLike[str]] = (),
+) -> Path | None:
+    """Find an optional side file next to the ledger, its data/ dir, or the CWD."""
+    return find_config_path(name, paths, None)
+
+
+def currency_totals(
+    rows: list[dict[str, Any]],
+    base_currency: str = DEFAULT_BASE_CURRENCY,
+) -> dict[str, dict[str, Decimal]]:
+    """Per-currency totals in the original currency, excluding the base currency.
+
+    Rows without a currency are treated as base currency and skipped here; their
+    amount is already in the main totals.
+    """
+    totals: dict[str, dict[str, Decimal]] = {}
+    for row in rows:
+        currency = currency_of(row, base_currency)
+        if currency == base_currency:
+            continue
+        original = decimal_value(row.get("original_amount"))
+        amount = abs(original if original is not None else money(row.get("金额")))
+        bucket = totals.setdefault(
+            currency,
+            {
+                "income": Decimal("0"),
+                "expense_gross": Decimal("0"),
+                "refunds": Decimal("0"),
+                "reimbursed": Decimal("0"),
+                "repayment": Decimal("0"),
+                "investment": Decimal("0"),
+                "count": Decimal("0"),
+            },
+        )
+        bucket["count"] += 1
+        tx_type = str(row.get("收支类型", "")).strip()
+        if is_refund(row):
+            bucket["refunds"] += amount
+        elif tx_type == "收入":
+            bucket["income"] += amount
+        elif tx_type == "支出":
+            bucket["expense_gross"] += amount
+        elif tx_type == "报销":
+            bucket["reimbursed"] += amount
+        elif tx_type == "还款":
+            bucket["repayment"] += amount
+        elif tx_type == "投资":
+            bucket["investment"] += amount
     return totals
 
 

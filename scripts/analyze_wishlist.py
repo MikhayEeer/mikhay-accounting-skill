@@ -172,7 +172,12 @@ def ledger_context(
         return None, Decimal("0"), Decimal("0"), Decimal("0"), rows
     for path in paths:
         rows.extend(load_ledger(path, config))
-    flows = accumulate(rows, config.catalog if config is not None else None, config.categories if config is not None else None)
+    flows = accumulate(
+        rows,
+        config.catalog if config is not None else None,
+        config.categories if config is not None else None,
+        config.invest_out_subcategory if config is not None else "赎回",
+    )
     expense = flows.expense_net
     surplus = flows.income - expense - flows.repayment - flows.investment_net
     return surplus, flows.income, expense, flows.repayment, rows
@@ -364,6 +369,7 @@ def main() -> int:
     parser.add_argument("--due", action="store_true", help="Print wishes whose cooling-off period has ended.")
     parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
     parser.add_argument("--categories", type=Path, help="Category config. Default: data/categories.json when present.")
+    parser.add_argument("--settings", type=Path, help="Workspace settings. Default: data/settings.json when present.")
     args = parser.parse_args()
     if args.as_of:
         as_of = parse_day(args.as_of)
@@ -376,6 +382,7 @@ def main() -> int:
         [args.wishlist, *args.ledger] + ([args.assets] if args.assets else []),
         args.accounts,
         args.categories,
+        args.settings,
     )
     if config.errors:
         raise SystemExit("\n".join(config.errors))

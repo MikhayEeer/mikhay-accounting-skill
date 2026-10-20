@@ -216,9 +216,10 @@ def main() -> int:
     parser.add_argument("--cc-method", choices=["A", "B", "a", "b"], default="A", help="Credit-card snapshot method. Default: A.")
     parser.add_argument("--write", action="store_true", help="Replace inferred_snapshot in the asset file.")
     parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
+    parser.add_argument("--settings", type=Path, help="Workspace settings. Default: data/settings.json when present.")
     args = parser.parse_args()
 
-    config = load_skill_config([args.assets, *args.ledger], args.accounts, None)
+    config = load_skill_config([args.assets, *args.ledger], args.accounts, None, args.settings)
     if config.errors:
         raise SystemExit("\n".join(config.errors))
     asset_data = load_json(args.assets)

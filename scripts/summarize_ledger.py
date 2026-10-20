@@ -18,6 +18,7 @@ from ledgerlib import (
     accumulate,
     apply_buckets,
     category_net,
+    currency_totals,
     fmt,
     fmt_pct,
     index_shard_files,
@@ -59,6 +60,7 @@ def main() -> int:
     parser.add_argument("--as-of", help="Date used to age 待报销 rows, YYYY-MM-DD. Default: today.")
     parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
     parser.add_argument("--categories", type=Path, help="Category config. Default: data/categories.json when present.")
+    parser.add_argument("--settings", type=Path, help="Workspace settings. Default: data/settings.json when present.")
     args = parser.parse_args()
     if args.as_of:
         parsed_as_of = parse_time(args.as_of)
@@ -68,7 +70,7 @@ def main() -> int:
     else:
         as_of = date.today()
 
-    config = load_skill_config(args.paths, args.accounts, args.categories)
+    config = load_skill_config(args.paths, args.accounts, args.categories, args.settings)
     if config.errors:
         raise SystemExit("\n".join(config.errors))
     records, files = collect_records(args.paths, config)
@@ -76,7 +78,12 @@ def main() -> int:
         raise SystemExit("no ledger files found")
     if args.month:
         records = [row for row in records if str(row.get("时间", "")).startswith(args.month)]
-    totals = accumulate(records, config.catalog, config.categories)
+    totals = accumulate(
+        records,
+        config.catalog,
+        config.categories,
+        config.invest_out_subcategory,
+    )
     nets = category_net(totals)
     net_whole = sum(nets.values(), Decimal("0"))
 
@@ -107,6 +114,18 @@ def main() -> int:
     print("\n## 双口径")
     print(f"- 花销口径: 毛额 {fmt(totals.expense_gross)}, 退款 {fmt(totals.refunds)}, 净额 {fmt(totals.expense_net)}")
     print(f"- 内部转账口径: {fmt(totals.internal_transfer)}")
+    print(f"- 基础币种: {config.base_currency}")
+
+    by_currency = currency_totals(records, config.base_currency)
+    if by_currency:
+        print("\n## 按币种（原币，不折算）")
+        for currency in sorted(by_currency):
+            bucket = by_currency[currency]
+            print(
+                f"- {currency}: 记录 {int(bucket['count'])}, 收入 {fmt(bucket['income'])}, "
+                f"支出毛额 {fmt(bucket['expense_gross'])}, 退款 {fmt(bucket['refunds'])}, "
+                f"已报销 {fmt(bucket['reimbursed'])}, 花销净额 {fmt(bucket['expense_gross'] - bucket['refunds'] - bucket['reimbursed'])}"
+            )
 
     if nets:
         print("\n## 花销按类别")
@@ -144,16 +163,13 @@ def main() -> int:
         for item in totals.pending_items:
             when = str(item.get("时间") or "")
             waited = ""
-            flag = ""
             if when:
                 stamped = parse_time(when)
                 if stamped is not None:
                     days = (as_of - stamped.date()).days
                     waited = f" 已等待 {days} 天"
-                    if days > 30:
-                        flag = " 超过30天"
             label = str(item.get("备注") or item.get("id") or "未命名")
-            print(f"- {when} {label}: {fmt(item['金额'])}{waited}{flag}")
+            print(f"- {when} {label}: {fmt(item['金额'])}{waited}")
     return 0
 
 

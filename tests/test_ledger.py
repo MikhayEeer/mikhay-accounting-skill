@@ -106,8 +106,10 @@ def test_validator_rejects_bad_tags_dates_duplicates_and_pairs() -> None:
     assert errors == []
     assert warnings == []
 
-    bad_tag, _ = validate_records([record(tags="foo:bar")], max_date=date(2026, 12, 31))
-    assert any("trip:" in error for error in bad_tag)
+    bad_tag, _ = validate_records([record(tags=":bar")], max_date=date(2026, 12, 31))
+    assert any("invalid tag" in error for error in bad_tag)
+    custom_tag, _ = validate_records([record(tags="project:move")], max_date=date(2026, 12, 31))
+    assert custom_tag == []
     legacy_errors, legacy_warnings = validate_records([record(tags="旅行")], max_date=date(2026, 12, 31))
     assert legacy_errors == []
     assert any("legacy tag" in warning for warning in legacy_warnings)
@@ -115,8 +117,15 @@ def test_validator_rejects_bad_tags_dates_duplicates_and_pairs() -> None:
     future, _ = validate_records([record(时间="2999-01-01 00:00")], max_date=date(2026, 12, 31))
     assert any("upper bound" in error for error in future)
 
-    dup, _ = validate_records([record(备注="同一笔"), record(备注="同一笔")], max_date=date(2026, 12, 31))
-    assert any("duplicate" in error for error in dup)
+    dup_errors, dup_warnings = validate_records(
+        [record(备注="同一笔"), record(备注="同一笔")], max_date=date(2026, 12, 31)
+    )
+    assert dup_errors == []
+    assert any("double entry" in warning for warning in dup_warnings)
+    id_errors, _ = validate_records(
+        [record(id="same", 备注="甲"), record(id="same", 备注="乙")], max_date=date(2026, 12, 31)
+    )
+    assert any("duplicate id" in error for error in id_errors)
 
     unequal, _ = validate_records(
         [
@@ -282,7 +291,7 @@ def test_included_and_excluded_net_worth_and_card_methods(tmp_path: Path) -> Non
     assert "花呗: -70.00" in method_b.stdout
 
 
-def test_forecast_uses_last_working_day(tmp_path: Path) -> None:
+def test_forecast_reports_card_cycle_without_payday(tmp_path: Path) -> None:
     path = tmp_path / "assets.json"
     write_json(
         path,
@@ -301,18 +310,12 @@ def test_forecast_uses_last_working_day(tmp_path: Path) -> None:
     )
     result = run("summarize_assets.py", str(path), "--as-of", "2026-06-15", "--forecast")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "发薪日: 2026-06-30" in result.stdout
+    assert "发薪日" not in result.stdout
     card = next(line for line in result.stdout.splitlines() if line.startswith("- 花呗: 预计账单"))
     assert "预计账单 200.00" in card
     assert "预计还款 80.00" in card
     assert "还款日 2026-06-10" in card
-    assert "还款在发薪日前" in card
-    assert "发薪日现金流: 收入 2000.00 - 现金花销净额 0.00 - 预计还款 80.00 = 1920.00" in result.stdout
-
-    from ledgerlib import last_working_day
-
-    assert last_working_day(2026, 10) == date(2026, 10, 30)
-    assert last_working_day(2026, 5) == date(2026, 5, 29)
+    assert "本月现金流: 收入 2000.00 - 现金花销净额 0.00 - 预计还款 80.00 = 1920.00" in result.stdout
 
 
 def test_import_shard_basename_and_schema_version(tmp_path: Path) -> None:
@@ -418,6 +421,10 @@ def test_extended_example_and_docs() -> None:
     assert "data/categories.json" in categories and "replace_defaults" in categories
     accounts_doc = (ROOT / "accounts.md").read_text(encoding="utf-8")
     assert "data/accounts.json" in accounts_doc and "别名" in accounts_doc and "replace_defaults" in accounts_doc
+    assert "投资账户" in accounts_doc
+    assert "data/settings.json" in skill
+    import_rules_doc = (ROOT / "import_rules.md").read_text(encoding="utf-8")
+    assert "data/import_rules.json" in import_rules_doc and "category_keywords" in import_rules_doc
     schema_doc = (ROOT / "schema.md").read_text(encoding="utf-8")
     assert "金额" in schema_doc and "0" in schema_doc
     assert (ROOT / "examples" / "accounts.sample.json").is_file()
@@ -426,7 +433,7 @@ def test_extended_example_and_docs() -> None:
     assert (ROOT / "CHANGELOG.md").exists()
     assert not (ROOT / "VERSION").exists()
     frontmatter = skill.split("---", 2)[1]
-    assert "version: 0.4.0" in frontmatter
+    assert "version: 0.4.2" in frontmatter
     assert 'displayName: "Mikhay 记账 - 资产管理/信用卡/预购清单/年月统计"' in frontmatter
     assert "homepage: https://github.com/MikhayEeer/mikhay-accounting-skill" in frontmatter
     assert "slug: mikhay-accounting-skill" in frontmatter
@@ -482,7 +489,7 @@ def test_package_omits_version_file_tests_and_github(tmp_path: Path) -> None:
     assert any(name.endswith("examples/workflow-credit-repay.md") for name in names)
     assert any(name.endswith("README.zh-CN.md") for name in names)
     manifest = json.loads(archive.read("mikhay-accounting-skill/MANIFEST.json"))
-    assert manifest["version"] == "0.4.0"
+    assert manifest["version"] == "0.4.2"
 
 
 BILL_CSV = (

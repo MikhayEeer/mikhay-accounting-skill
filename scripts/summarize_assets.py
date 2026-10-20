@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize included and excluded net worth, credit cards, and payday forecast."""
+"""Summarize included and excluded net worth, credit cards, and a card forecast."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ from ledgerlib import (
     decimal_value,
     fmt,
     fmt_pct,
+    find_optional_data_file,
     is_refund,
-    last_working_day,
     load_file,
     load_skill_config,
     merge_account_policy,
@@ -132,15 +132,19 @@ def repayments_between(records: list[dict[str, Any]], card: str, start: date, en
     return total
 
 
-def forecast(data: dict[str, Any], records: list[dict[str, Any]], as_of: date, catalog: dict[str, dict[str, str]]) -> None:
+def forecast(
+    data: dict[str, Any],
+    records: list[dict[str, Any]],
+    as_of: date,
+    catalog: dict[str, dict[str, Any]],
+    invest_out_subcategory: str = "赎回",
+) -> None:
     from ledgerlib import cycle_start, due_date_for_cycle, previous_cycle_start
 
     print("\n## 预测")
-    payday = last_working_day(as_of.year, as_of.month)
-    print(f"- 发薪日: {payday.isoformat()}")
     cards = data.get("credit_accounts") or []
     month_rows = [row for row in records if str(row.get("时间", "")).startswith(as_of.strftime("%Y-%m"))]
-    flows = accumulate(month_rows, catalog)
+    flows = accumulate(month_rows, catalog, None, invest_out_subcategory)
     projected_due = Decimal("0")
     if not cards:
         print("- 无信贷账户")
@@ -164,7 +168,6 @@ def forecast(data: dict[str, Any], records: list[dict[str, Any]], as_of: date, c
         else:
             repayment = max(previous_charges - paid, Decimal("0"))
         due = due_date_for_cycle(start, due_day, bill_day)
-        relation = "还款在发薪日前" if due <= payday else "还款在发薪日后"
         if due.year == as_of.year and due.month == as_of.month:
             projected_due += repayment
         assumed = []
@@ -175,11 +178,11 @@ def forecast(data: dict[str, Any], records: list[dict[str, Any]], as_of: date, c
         suffix = f", {'、'.join(assumed)}" if assumed else ""
         print(
             f"- {account}: 预计账单 {fmt(statement)}, 预计还款 {fmt(repayment)}, "
-            f"还款日 {due.isoformat()}, 发薪日 {payday.isoformat()}, {relation}{suffix}"
+            f"还款日 {due.isoformat()}{suffix}"
         )
     cash = flows.income - flows.cash_expense_net - projected_due - flows.investment_net
     cash_line = (
-        f"- 发薪日现金流: 收入 {fmt(flows.income)} - 现金花销净额 {fmt(flows.cash_expense_net)} "
+        f"- 本月现金流: 收入 {fmt(flows.income)} - 现金花销净额 {fmt(flows.cash_expense_net)} "
         f"- 预计还款 {fmt(projected_due)}"
     )
     if flows.investment_net != 0:
@@ -209,13 +212,14 @@ def main() -> int:
     parser.add_argument("--ledger", action="append", type=Path, default=[], help="Extra ledger shard. Can be repeated.")
     parser.add_argument("--as-of", help="Date for inference and forecast, YYYY-MM-DD. Default: today.")
     parser.add_argument("--cc-method", choices=["A", "B"], default="A", help="Credit-card snapshot method. Default: A.")
-    parser.add_argument("--forecast", action="store_true", help="Project card statements and payday cash flow.")
+    parser.add_argument("--forecast", action="store_true", help="Project card statements and the current-month cash flow.")
     parser.add_argument("--items", type=Path, help="Optional items.json. Residual is listed and not added to any total.")
     parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
     parser.add_argument("--categories", type=Path, help="Category config. Default: data/categories.json when present.")
+    parser.add_argument("--settings", type=Path, help="Workspace settings. Default: data/settings.json when present.")
     args = parser.parse_args()
 
-    config = load_skill_config([args.file, *args.ledger], args.accounts, args.categories)
+    config = load_skill_config([args.file, *args.ledger], args.accounts, args.categories, args.settings)
     if config.errors:
         raise SystemExit("\n".join(config.errors))
     book, errors = load_file(args.file)
@@ -384,13 +388,20 @@ def main() -> int:
             print(f"- {row.get('时间')} {row.get('账户')}: {fmt(money(row.get('金额')))} {prefix}")
 
     if args.forecast:
-        forecast(data, records, as_of_date, catalog or default_account_catalog())
+        forecast(
+            data,
+            records,
+            as_of_date,
+            catalog or default_account_catalog(),
+            config.invest_out_subcategory,
+        )
 
     items_path = args.items
     if items_path is None:
-        default_items = Path("data/items/items.json")
-        if default_items.exists():
-            items_path = default_items
+        search_paths = [args.file, *args.ledger]
+        items_path = find_optional_data_file("items.json", search_paths)
+        if items_path is None:
+            items_path = find_optional_data_file("items/items.json", search_paths)
     if items_path is not None:
         from summarize_items import load_items, residual_of
 

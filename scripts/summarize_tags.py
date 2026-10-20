@@ -159,9 +159,10 @@ def main() -> int:
     parser.add_argument("--shard", choices=["day", "month"], default="month", help="Basename key used to index shards.")
     parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
     parser.add_argument("--categories", type=Path, help="Category config. Default: data/categories.json when present.")
+    parser.add_argument("--settings", type=Path, help="Workspace settings. Default: data/settings.json when present.")
     args = parser.parse_args()
 
-    config = load_skill_config(args.paths, args.accounts, args.categories)
+    config = load_skill_config(args.paths, args.accounts, args.categories, args.settings)
     if config.errors:
         raise SystemExit("\n".join(config.errors))
     records, files = collect(args.paths, config)

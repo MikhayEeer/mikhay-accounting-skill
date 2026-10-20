@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from test_ledger import record, run, write_json
 
 
-def test_lint_warns_near_duplicates_aliases_and_overdue_reimbursement(tmp_path: Path) -> None:
+def test_lint_warns_near_duplicates_alias_windows_and_unknown_accounts(tmp_path: Path) -> None:
     ledger = tmp_path / "2026-06.json"
     write_json(
         ledger,
@@ -42,13 +43,25 @@ def test_lint_warns_near_duplicates_aliases_and_overdue_reimbursement(tmp_path: 
             ],
         },
     )
-    aliases = tmp_path / "aliases.json"
-    aliases.write_text(
-        '[{"名称":"美团","含义":"美团钱包","起":"2026-01-01","止":"2026-06-30"}]\n',
+    accounts = tmp_path / "accounts.json"
+    accounts.write_text(
+        json.dumps(
+            {
+                "accounts": [
+                    {
+                        "账户": "美团",
+                        "别名": [
+                            {"名称": "美团", "含义": "美团钱包", "起": "2026-01-01", "止": "2026-06-30"}
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     before = ledger.read_text(encoding="utf-8")
-    result = run("lint_ledger.py", str(ledger), "--aliases", str(aliases), "--as-of", "2026-06-20")
+    result = run("lint_ledger.py", str(ledger), "--accounts", str(accounts), "--as-of", "2026-06-20")
     assert result.returncode == 0, result.stdout + result.stderr
     assert ledger.read_text(encoding="utf-8") == before
     assert "近似重复 record[1] 与 record[2]" in result.stdout
@@ -57,12 +70,10 @@ def test_lint_warns_near_duplicates_aliases_and_overdue_reimbursement(tmp_path: 
     assert "别名 美团" in result.stdout
     assert "2026-07-02" in result.stdout
     assert "新账户 现金罐" in result.stdout
-    merchant_lines = [line for line in result.stdout.splitlines() if line.endswith("新商户 午饭套餐")]
-    assert merchant_lines == ["- record[1]: 新商户 午饭套餐"]
     assert "usually uses a negative" in result.stdout
     assert "还款没有 target_account" in result.stdout
     assert "报销没有 reimburse_of" in result.stdout
-    assert "待报销超过30天" in result.stdout
+    assert "超过30天" not in result.stdout
     assert "## 月度覆盖" in result.stdout
 
 

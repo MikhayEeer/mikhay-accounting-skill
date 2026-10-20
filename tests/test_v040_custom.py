@@ -173,3 +173,166 @@ def test_bom_prefixed_config_still_loads(tmp_path: Path) -> None:
     write_json(ledger, {"schema_version": "0.3.0", "records": [record(账户="现金", 金额=-10)]})
     result = run("validate_ledger.py", str(ledger), "--accounts", str(accounts))
     assert result.returncode == 0, result.stdout + result.stderr
+
+def test_multi_currency_and_base_currency(tmp_path: Path) -> None:
+    settings = tmp_path / "custom-settings.json"
+    settings.write_text(json.dumps({"base_currency": "CNY"}), encoding="utf-8")
+    ledger = tmp_path / "2026-06.json"
+    write_json(
+        ledger,
+        {
+            "schema_version": "0.3.0",
+            "records": [
+                record(金额=-70, currency="USD", original_amount=-10, fx_rate=7, cny_amount=-70),
+                record(时间="2026-06-02 10:00", 金额=-20, 备注="人民币"),
+            ],
+        },
+    )
+    checked = run("validate_ledger.py", str(ledger), "--settings", str(settings))
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    summary = run("summarize_ledger.py", str(ledger), "--settings", str(settings))
+    assert summary.returncode == 0, summary.stdout + summary.stderr
+    assert "按币种（原币，不折算）" in summary.stdout
+    usd_line = next(line for line in summary.stdout.splitlines() if line.startswith("- USD:"))
+    assert "支出毛额 10.00" in usd_line
+
+    jpy_settings = tmp_path / "custom-jpy.json"
+    jpy_settings.write_text(json.dumps({"base_currency": "JPY"}), encoding="utf-8")
+    jpy_ledger = tmp_path / "jpy.json"
+    write_json(
+        jpy_ledger,
+        {
+            "schema_version": "0.3.0",
+            "records": [
+                record(金额=-2000, currency="CNY", original_amount=-100, fx_rate=20, cny_amount=-2000),
+            ],
+        },
+    )
+    jpy_checked = run("validate_ledger.py", str(jpy_ledger), "--settings", str(jpy_settings))
+    assert jpy_checked.returncode == 0, jpy_checked.stdout + jpy_checked.stderr
+    assert "非-CNY" not in jpy_checked.stdout
+
+
+def test_import_rules_are_configurable(tmp_path: Path) -> None:
+    accounts = write_json_file(
+        tmp_path / "custom-accounts.json",
+        {"replace_defaults": True, "accounts": [{"账户": "测试现金", "账户类型": "资产"}]},
+    )
+    categories = write_json_file(
+        tmp_path / "custom-categories.json",
+        {"replace_defaults": True, "categories": {"宠物": ["猫粮"]}},
+    )
+    import_rules = write_json_file(
+        tmp_path / "custom-import-rules.json",
+        {
+            "category_keywords": [{"类别": "宠物", "子类": "猫粮", "关键词": ["猫粮", "猫砂"]}],
+            "fallback": {"类别": "宠物", "子类": "猫粮"},
+        },
+    )
+    bill = tmp_path / "bill.csv"
+    bill.write_text(
+        "时间,收支类型,金额,类别,子类,账户,备注\n"
+        "2026-06-05 10:00,支出,20,,,测试现金,猫粮\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.json"
+    result = run(
+        "import_ledger.py",
+        str(bill),
+        "--output",
+        str(out),
+        "--accounts",
+        str(accounts),
+        "--categories",
+        str(categories),
+        "--import-rules",
+        str(import_rules),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = read_json(out)
+    assert payload["records"][0]["类别"] == "宠物"
+    assert payload["records"][0]["子类"] == "猫粮"
+
+
+def test_investment_account_flag_drives_direction(tmp_path: Path) -> None:
+    accounts = write_json_file(
+        tmp_path / "custom-accounts.json",
+        {
+            "accounts": [
+                {"账户": "建设银行", "账户类型": "资产"},
+                {"账户": "基金", "账户类型": "资产", "投资账户": True},
+            ]
+        },
+    )
+    ledger = tmp_path / "invest.json"
+    write_json(
+        ledger,
+        {
+            "schema_version": "0.3.0",
+            "records": [
+                record(
+                    id="buy-out",
+                    时间="2026-06-01 09:00",
+                    收支类型="投资",
+                    金额=-100,
+                    类别="投资",
+                    子类="定投",
+                    账户="建设银行",
+                    备注="买入",
+                    pairid="inv",
+                ),
+                record(
+                    id="buy-in",
+                    时间="2026-06-01 09:01",
+                    收支类型="投资",
+                    金额=100,
+                    类别="投资",
+                    子类="定投",
+                    账户="基金",
+                    备注="买入",
+                    pairid="inv",
+                ),
+                record(
+                    id="sell",
+                    时间="2026-06-10 09:00",
+                    收支类型="投资",
+                    金额=40,
+                    类别="投资",
+                    子类="卖出",
+                    账户="建设银行",
+                    备注="赎回",
+                    target_account="基金",
+                ),
+            ],
+        },
+    )
+    checked = run("validate_ledger.py", str(ledger), "--accounts", str(accounts))
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    summary = run("summarize_ledger.py", str(ledger), "--accounts", str(accounts))
+    assert summary.returncode == 0, summary.stdout + summary.stderr
+    assert "- 投资净投入: 60.00" in summary.stdout
+
+
+def test_zero_amount_pending_reimbursement_is_flagged(tmp_path: Path) -> None:
+    ledger = tmp_path / "pending.json"
+    write_json(
+        ledger,
+        {
+            "schema_version": "0.3.0",
+            "records": [
+                record(
+                    金额=0,
+                    类别="出行交通",
+                    子类="飞机",
+                    备注="全额报销",
+                    报销状态="待报销",
+                    预计报销=500,
+                )
+            ],
+        },
+    )
+    checked = run("validate_ledger.py", str(ledger))
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    assert "金额为 0 的支出仍标为" in checked.stdout
+    summary = run("summarize_ledger.py", str(ledger))
+    assert "- 待报销: 0.00" in summary.stdout

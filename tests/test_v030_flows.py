@@ -127,7 +127,6 @@ def test_reimbursement_reduces_spending_only_after_cash_arrives(tmp_path: Path) 
     pending = summary.stdout.split("## 待报销", 1)[1]
     assert "餐费: 70.00" in pending
     assert "已等待 51 天" in pending
-    assert "超过30天" in pending
     assert "打车" not in pending
 
 
@@ -278,7 +277,7 @@ def test_investment_without_snapshot_skips_market_pnl(tmp_path: Path) -> None:
     assert assets.returncode == 0, assets.stdout + assets.stderr
     assert "无市值快照，不估算浮动盈亏" in assets.stdout
     assert "浮动盈亏" not in assets.stdout.split("无市值快照", 1)[0].split("## 投资", 1)[-1]
-    assert "发薪日现金流: 收入 0.00 - 现金花销净额 0.00 - 预计还款 0.00 - 投资净投入 200.00 = -200.00" in assets.stdout
+    assert "本月现金流: 收入 0.00 - 现金花销净额 0.00 - 预计还款 0.00 - 投资净投入 200.00 = -200.00" in assets.stdout
     included = assets.stdout.split("## 计入净资产", 1)[1].split("##", 1)[0]
     assert "证券" not in included
 

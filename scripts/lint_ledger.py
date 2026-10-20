@@ -21,6 +21,7 @@ from ledgerlib import (
     CategoryCatalog,
     decimal_value,
     default_account_catalog,
+    find_optional_data_file,
     iter_ledger_files,
     load_file,
     load_skill_config,
@@ -29,6 +30,7 @@ from ledgerlib import (
     parse_time,
     reimburse_ref,
     reimburse_status,
+    resolve_account,
     target_account,
 )
 from validate_ledger import validate_records
@@ -96,19 +98,26 @@ def near_duplicates(rows: list[dict[str, Any]]) -> list[str]:
     return warnings
 
 
-def load_aliases(path: Path | None) -> tuple[list[dict[str, Any]], list[str]]:
-    if path is None or not path.exists():
-        return [], []
-    try:
-        data = _load_json(path)
-    except json.JSONDecodeError as exc:
-        return [], [f"aliases: invalid JSON: {exc}"]
-    rows = _as_list(data, "aliases")
-    warnings: list[str] = []
-    for index, row in enumerate(rows, 1):
-        if _blank(row.get("名称")):
-            warnings.append(f"aliases[{index}]: missing 名称")
-    return rows, warnings
+def configured_alias_windows(catalog: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Alias history lives with the account definition, not in a second file."""
+    rows: list[dict[str, Any]] = []
+    for account, meta in catalog.items():
+        for window in meta.get("alias_windows") or []:
+            if not isinstance(window, dict):
+                continue
+            name = str(window.get("名称", "") or "").strip()
+            if not name:
+                continue
+            rows.append(
+                {
+                    "名称": name,
+                    "含义": str(window.get("含义", "") or "").strip(),
+                    "起": str(window.get("起", "") or "").strip(),
+                    "止": str(window.get("止", "") or "").strip(),
+                    "账户": account,
+                }
+            )
+    return rows
 
 
 def _in_window(day: date, row: dict[str, Any]) -> bool:
@@ -121,35 +130,36 @@ def _in_window(day: date, row: dict[str, Any]) -> bool:
     return True
 
 
-def alias_warnings(rows: list[dict[str, Any]], aliases: list[dict[str, Any]], catalog: dict[str, dict[str, str]]) -> list[str]:
+def alias_warnings(
+    rows: list[dict[str, Any]],
+    windows: list[dict[str, Any]],
+    catalog: dict[str, dict[str, Any]],
+) -> list[str]:
     warnings: list[str] = []
-    known_names = {str(row.get("名称", "")).strip() for row in aliases if str(row.get("名称", "")).strip()}
-    known_names |= {str(row.get("含义", "")).strip() for row in aliases if str(row.get("含义", "")).strip()}
+    known_names = {str(row.get("名称", "")).strip() for row in windows if str(row.get("名称", "")).strip()}
+    known_names |= {str(row.get("含义", "")).strip() for row in windows if str(row.get("含义", "")).strip()}
     seen_accounts: set[str] = set()
-    seen_merchants: set[str] = set()
     for index, row in enumerate(rows, 1):
         if not isinstance(row, dict):
             continue
         account = str(row.get("账户", "")).strip()
+        resolved = resolve_account(account, catalog) if account else ""
         note = str(row.get("备注", "")).strip()
         stamp = parse_time(row.get("时间"))
         day = stamp.date() if stamp else None
-        for alias in aliases:
+        for alias in windows:
             name = str(alias.get("名称", "")).strip()
             if not name or day is None:
                 continue
-            used = account == name or name in note
+            used = account == name or name in account or name in note
             if used and not _in_window(day, alias):
                 meaning = str(alias.get("含义", "")).strip() or name
                 warnings.append(
                     f"record[{index}]: 别名 {name}（{meaning}）用在生效区间外 {day.isoformat()}"
                 )
-        if account and account not in catalog and account not in known_names and account not in seen_accounts:
-            seen_accounts.add(account)
+        if resolved and resolved not in catalog and resolved not in known_names and resolved not in seen_accounts:
+            seen_accounts.add(resolved)
             warnings.append(f"record[{index}]: 新账户 {account}")
-        if note and not any(name and name in note for name in known_names) and note not in seen_merchants:
-            seen_merchants.add(note)
-            warnings.append(f"record[{index}]: 新商户 {note}")
     return warnings
 
 
@@ -339,10 +349,6 @@ def flow_warnings(rows: list[dict[str, Any]], as_of: date) -> list[str]:
             warnings.append(f"record[{index}]: 还款没有 target_account")
         if tx_type == "报销" and not reimburse_ref(row):
             warnings.append(f"record[{index}]: 报销没有 reimburse_of")
-        if tx_type == "支出" and reimburse_status(row) == "待报销":
-            stamp = parse_time(row.get("时间"))
-            if stamp is not None and (as_of - stamp.date()).days > 30:
-                warnings.append(f"record[{index}]: 待报销超过30天（{(as_of - stamp.date()).days} 天）")
     return warnings
 
 
@@ -414,12 +420,12 @@ def collect_files(paths: list[Path]) -> list[Path]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Read-only lint for a Chinese personal ledger.")
     parser.add_argument("paths", nargs="+", type=Path, help="Ledger files or directories.")
-    parser.add_argument("--aliases", type=Path, help="Alias table. Default: data/aliases.json when that file exists.")
     parser.add_argument("--recurring", type=Path, help="Fixed expenses. Default: data/recurring.json when that file exists.")
     parser.add_argument("--items", type=Path, help="Subscriptions file. Default: data/items/items.json when that file exists.")
     parser.add_argument("--as-of", help="Age pending reimbursements and fixed expenses as of YYYY-MM-DD. Default: today.")
     parser.add_argument("--accounts", type=Path, help="Account config. Default: data/accounts.json when present.")
     parser.add_argument("--categories", type=Path, help="Category config. Default: data/categories.json when present.")
+    parser.add_argument("--settings", type=Path, help="Workspace settings. Default: data/settings.json when present.")
     args = parser.parse_args()
     if args.as_of:
         parsed = parse_time(args.as_of)
@@ -429,20 +435,19 @@ def main() -> int:
     else:
         as_of = date.today()
 
-    aliases_path = args.aliases if args.aliases is not None else Path("data/aliases.json")
-    recurring_path = args.recurring if args.recurring is not None else Path("data/recurring.json")
-    items_path = args.items if args.items is not None else Path("data/items/items.json")
-    if args.aliases is None and not aliases_path.exists():
-        aliases_path = None
-    if args.recurring is None and not recurring_path.exists():
-        recurring_path = None
-    if args.items is None and not items_path.exists():
-        items_path = None
+    recurring_path = args.recurring
+    if recurring_path is None:
+        recurring_path = find_optional_data_file("recurring.json", args.paths)
+    items_path = args.items
+    if items_path is None:
+        items_path = find_optional_data_file("items.json", args.paths)
+        if items_path is None:
+            items_path = find_optional_data_file("items/items.json", args.paths)
 
     files = collect_files(args.paths)
     if not files:
         raise SystemExit("no ledger files found")
-    config = load_skill_config(args.paths, args.accounts, args.categories)
+    config = load_skill_config(args.paths, args.accounts, args.categories, args.settings)
     rows: list[dict[str, Any]] = []
     errors: list[str] = list(config.errors)
     catalog: dict[str, dict[str, Any]] = {}
@@ -452,7 +457,6 @@ def main() -> int:
             continue
         if load_errors:
             errors.extend(f"{path}: {item}" for item in load_errors)
-        config.apply_to_book(book)
         merged, policy_errors = merge_account_policy(book.get("account_policy") or [], base=config.catalog)
         catalog.update(merged)
         errors.extend(policy_errors)
@@ -461,7 +465,7 @@ def main() -> int:
         catalog = default_account_catalog()
 
     categories: CategoryCatalog = config.categories
-    aliases, alias_load_warnings = load_aliases(aliases_path)
+    aliases = configured_alias_windows(catalog)
     specs, fixed_load_warnings = load_fixed(recurring_path, items_path)
     _, validate_warnings = validate_records(
         rows,
@@ -469,10 +473,10 @@ def main() -> int:
         strict_refs=len(files) > 1,
         catalog=catalog,
         categories=categories,
+        base_currency=config.base_currency,
     )
     missing, hits = missing_fixed(rows, specs, as_of)
     warnings = [
-        *alias_load_warnings,
         *fixed_load_warnings,
         *validate_warnings,
         *near_duplicates(rows),

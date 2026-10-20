@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.2 - 2026-10-20
+
+Skill version is `0.4.2`. Ledger `schema_version` stays `0.3.0`; old books keep their totals.
+
+### Added
+
+- `data/settings.json`: `base_currency` (default `CNY`) and `invest_out_subcategory` (default `赎回`). Every script accepts `--settings PATH`.
+- `data/import_rules.json`: `category_keywords`, `fallback`, and `source_accounts` for third-party bills. `--import-rules PATH` overrides it.
+- Multi-currency reporting: `summarize_ledger.py` adds a `按币种（原币）` section. Rows without `currency` use the configured base currency.
+- Account field `投资账户: true` makes investment direction explicit: money entering the account is 投入, money leaving it is 赎回.
+- Alias history windows now live inside `data/accounts.json` alias entries (`{"名称": "...", "起": "...", "止": "..."}`). `lint_ledger.py` reads them from there.
+- Free-form tag namespaces: any letter-first `prefix:suffix` is valid (`project:move`, `pet:vaccine`), not only trip/event/person/nature.
+
+### Changed
+
+- Removed the payday assumption and `last_working_day`. `--forecast` reports each card's statement, repayment, and due date, plus the current-month cash flow. The skill no longer guesses when salary arrives.
+- Removed the 30-day 待报销 warning. Pending reimbursement age is still shown, without a threshold judgment.
+- Removed the second alias mechanism: `data/aliases.json` and `--aliases` are gone; one account file defines accounts, aliases, and alias windows.
+- Duplicate-looking records with the same time/type/amount/account/note are now a warning instead of an error. A duplicate `id` is still an error.
+- A zero-amount expense marked `待报销` is flagged, and does not print pending money in summaries.
+- `data/items/items.json`, `data/recurring.json`, and the import rules are discovered next to the ledger, not only under the current directory.
+- Import falls back through configured categories and accounts instead of hardcoded 支付宝 / 购物消费 / 其他.
+
 ## 0.4.0 - 2026-10-20
 
 Skill version is `0.4.0`. Ledger `schema_version` stays `0.3.0`: the record shape is backward compatible, and an unedited 0.2.0 or 0.3.0 book still validates with the same totals.

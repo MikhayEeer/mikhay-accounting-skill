@@ -42,6 +42,9 @@ Two optional side files make the skill fit a real user. Both are read by every s
 
 - `data/accounts.json`: accounts, account `别名`, `账户类型`, `纳入`, and `信用卡`. Shape and rules are in `accounts.md`.
 - `data/categories.json`: custom categories, category aliases, and subcategory aliases. Shape and rules are in `categories.md`.
+- `data/settings.json`: `base_currency` (default `CNY`) and `invest_out_subcategory` (default `赎回`).
+- `data/import_rules.json`: import keyword table, fallback pair, and source-account map. Shape is in `import_rules.md`.
+- Alias history windows are part of `data/accounts.json` alias entries. There is no separate `data/aliases.json`.
 
 `replace_defaults: true` in either file drops the starter list. Files may be UTF-8 with or without a BOM. Unknown accounts and unknown categories are warnings by default; `validate_ledger.py --strict` turns them into errors.
 
@@ -146,14 +149,7 @@ For reminders, use a separate JSON file if needed:
 
 ## Tags
 
-Prefer namespaced tags. A record may carry more than one tag; each tag receives the full amount.
-
-- `trip:` a trip, such as `trip:demo`
-- `event:` an event, such as `event:demo`
-- `person:` a person, such as `person:demo`
-- `nature:` why the money moved, such as `nature:need`
-
-Older bare tags such as `旅行` still load, with a warning. Any other `prefix:` is invalid.
+Tags are namespaced, and the namespace is yours. Any letter-first `prefix:suffix` is valid, for example `trip:demo`, `event:demo`, `person:demo`, `nature:need`, `project:move`, or `pet:vaccine`. A record may carry more than one tag; each tag receives the full amount. Older bare tags such as `旅行` still load, with a warning.
 
 `scripts/summarize_tags.py` is the only way to total tags. It reads every shard it is given.
 
@@ -199,14 +195,14 @@ A `pairid` group must contain exactly two `转账` rows, with equal absolute amo
 
 ## Currency
 
-Default currency is `CNY`. Optional columns:
+Base currency is `CNY` by default and is set with `data/settings.json` (`base_currency`). Rows without `currency` use the base currency. Optional columns:
 
-- `currency`: 3-letter code, default `CNY`.
+- `currency`: 3-letter code, default is the base currency.
 - `original_amount`: signed amount in `currency`.
-- `fx_rate`: multiplier into CNY. `CNY` uses `1`.
-- `cny_amount`: signed CNY amount. It must match `金额`.
+- `fx_rate`: multiplier into the base currency. Base-currency rows use `1`.
+- `cny_amount`: signed base-currency amount (legacy field name). It must match `金额`.
 
-`金额` stays the signed CNY amount used by every total. For a non-CNY row, `金额` must equal `original_amount * fx_rate` within 0.01.
+`金额` stays the signed base-currency amount used by every headline total. For a non-base row, `金额` must equal `original_amount * fx_rate` within 0.01. `summarize_ledger.py` also prints a per-currency section with original amounts.
 
 ## Account Inclusion
 

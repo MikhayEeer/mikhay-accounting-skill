@@ -1,6 +1,6 @@
 # Agent Handoff
 
-Use this folder as a self-contained accounting skill. Skill version `0.4.0` lives in `SKILL.md` frontmatter. Ledger `schema_version` stays `0.3.0`; unedited `0.2.0` books still validate. Homepage: https://github.com/MikhayEeer/mikhay-accounting-skill. The ledger stays on the local machine and is not uploaded. This skill is for Chinese personal ledgers. `slug` stays `mikhay-accounting-skill`.
+Use this folder as a self-contained accounting skill. Skill version `0.4.2` lives in `SKILL.md` frontmatter. Ledger `schema_version` stays `0.3.0`; unedited `0.2.0` books still validate. Homepage: https://github.com/MikhayEeer/mikhay-accounting-skill. The ledger stays on the local machine and is not uploaded. This skill is for Chinese personal ledgers. `slug` stays `mikhay-accounting-skill`.
 
 ## Start
 
@@ -44,7 +44,7 @@ python scripts/analyze_wishlist.py <wishlist.json> --ledger <month-ledger.json> 
 python scripts/export_ledger.py <ledger.json> --output exports/ledger.csv
 ```
 
-Validation warns instead of failing on unknown accounts and categories; `--strict` turns those warnings into errors. Refunds, reimbursements, and AA are normally netted in place on the original row: a fully settled item becomes `金额=0`, a partial one keeps the remainder, and an over-settlement becomes an `收入` row for the difference.
+Validation warns instead of failing on unknown accounts and categories; `--strict` turns those warnings into errors. There is no payday guess: `--forecast` reports card statements, repayments, due dates, and the current-month cash flow only. Tag namespaces are free-form. Refunds, reimbursements, and AA are normally netted in place on the original row: a fully settled item becomes `金额=0`, a partial one keeps the remainder, and an over-settlement becomes an `收入` row for the difference.
 
 Direct asset edits should report the ledger-derived difference and ask before creating adjustment records.
 
@@ -68,6 +68,8 @@ Preferred ledger shards:
 - `data/wishlist/YYYY/wishlist.json`
 - `data/accounts.json`
 - `data/categories.json`
+- `data/settings.json`
+- `data/import_rules.json`
 
 ## Package
 
